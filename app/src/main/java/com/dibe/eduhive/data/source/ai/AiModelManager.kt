@@ -35,6 +35,7 @@ class AIModelManager @Inject constructor(
         const val MODEL_SMOLLM_360M = "smollm-360m"
 
         // HuggingFace URLs
+
         private const val QWEN_0_5B_URL = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf"
         private const val QWEN_1_5B_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q8_0.gguf"
         private const val SMOLLM_360M_URL = "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q8_0.gguf"

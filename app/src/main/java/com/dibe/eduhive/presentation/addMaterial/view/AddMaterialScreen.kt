@@ -82,15 +82,12 @@ fun AddMaterialScreen(
                 UploadCard(
                     icon = "📄",
                     title = "Upload Document",
-                    subtitle = "PDF • PPTX • DOCX",
+                    subtitle = "PDF • HTML",
                     onClick = {
                         documentPicker.launch(
                             arrayOf(
                                 "application/pdf",
-                                "application/vnd.ms-powerpoint",
-                                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                "application/msword",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                "text/html"
                             )
                         )
                     }
@@ -117,14 +114,15 @@ fun AddMaterialScreen(
                 )
             }
 
-            // Processing Dialog
+            // Processing Dialog with Progress
             if (state.isProcessing) {
-                ProcessingDialog(
-                    status = state.processingStatus ?: "Processing..."
+                ProcessingProgressDialog(
+                    status = state.processingStatus ?: "Processing...",
+                    progress = state.progressPercentage/ 100f
                 )
             }
 
-            // Success Message
+            // Success Dialog
             state.successMessage?.let { message ->
                 SuccessDialog(
                     message = message,
@@ -215,18 +213,31 @@ fun UploadCard(
 }
 
 @Composable
-fun ProcessingDialog(status: String) {
+fun ProcessingProgressDialog(
+    status: String,
+    progress: Float
+) {
     AlertDialog(
         onDismissRequest = { },
-        title = { Text("Processing Material...") },
+        title = { Text("Processing Material") },
         text = {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                CircularProgressIndicator()
+                LinearProgressIndicator(
+                    progress = progress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                )
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(status)
+                Text("${(progress * 100).toInt()}%")
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         },
         confirmButton = { }
