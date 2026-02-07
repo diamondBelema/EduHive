@@ -58,19 +58,24 @@ class FlashcardRepositoryImpl @Inject constructor(
         count: Int
     ): List<Flashcard> {
         // Use AI to generate flashcards
-        val generated = aiDataSource.generateFlashcards(
+        val result= aiDataSource.generateFlashcards(
             conceptName = conceptName,
-            conceptDescription = conceptDescription,
+            conceptDescription = conceptDescription ?: "",
             count = count
         )
 
+        val extractedFlashcard = result.getOrElse { error ->
+            // You can log this later if you want
+            return emptyList()
+        }
+
         // Convert to domain models
-        val flashcards = generated.map {
+        val flashcards = extractedFlashcard.map { flashcard ->
             Flashcard(
                 id = UUID.randomUUID().toString(),
                 conceptId = conceptId,
-                front = it.front,
-                back = it.back,
+                front = flashcard.front,
+                back = flashcard.back,
                 currentBox = 1, // Start in box 1
                 lastSeenAt = null,
                 nextReviewAt = System.currentTimeMillis() // Due now

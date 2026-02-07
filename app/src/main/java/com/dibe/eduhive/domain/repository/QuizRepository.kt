@@ -23,4 +23,11 @@ interface QuizRepository {
     suspend fun getQuizWithQuestions(quizId: String): Pair<Quiz, List<QuizQuestion>>?
 
     suspend fun deleteQuiz(quizId: String)
+
+    suspend fun generateQuizForConcept(
+        conceptId: String,
+        conceptName: String,
+        conceptDescription: String?,
+        questionCount: Int = 5
+    ): Pair<Quiz, List<QuizQuestion>>
 }

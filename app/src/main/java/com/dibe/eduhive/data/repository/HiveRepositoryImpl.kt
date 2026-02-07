@@ -3,6 +3,7 @@ package com.dibe.eduhive.data.repository
 import com.dibe.eduhive.data.local.dao.HiveDao
 import com.dibe.eduhive.data.local.entity.HiveEntity
 import com.dibe.eduhive.data.source.local.ConceptLocalDataSource
+import com.dibe.eduhive.data.source.local.HiveLocalDataSource
 import com.dibe.eduhive.domain.model.Hive
 import com.dibe.eduhive.domain.repository.HiveRepository
 import jakarta.inject.Inject

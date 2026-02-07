@@ -4,6 +4,8 @@ import android.net.Uri
 import com.dibe.eduhive.data.repository.ConceptRepositoryImpl
 import com.dibe.eduhive.data.repository.FlashcardRepositoryImpl
 import com.dibe.eduhive.data.source.file.FileDataSource
+import com.dibe.eduhive.domain.repository.ConceptRepository
+import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
 import javax.inject.Inject
 
@@ -18,8 +20,8 @@ import javax.inject.Inject
 class ProcessMaterialUseCase @Inject constructor(
     private val materialRepository: MaterialRepository,
     private val fileDataSource: FileDataSource,
-    private val conceptRepository: ConceptRepositoryImpl,
-    private val flashcardRepository: FlashcardRepositoryImpl
+    private val conceptRepository: ConceptRepository,
+    private val flashcardRepository: FlashcardRepository
 ) {
     suspend operator fun invoke(
         materialId: String,

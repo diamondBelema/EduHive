@@ -1,7 +1,7 @@
 package com.dibe.eduhive.data.local.database
 
 import androidx.room.TypeConverter
-import com.dibe.eduhive.data.local.entity.MaterialType
+import com.dibe.eduhive.domain.model.MaterialType
 
 class EnumConverters {
 

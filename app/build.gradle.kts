@@ -3,7 +3,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlinAndroidKsp)
     alias(libs.plugins.hiltAndroid)
@@ -16,13 +15,9 @@ android {
         version = release(36)
     }
 
-    fun Packaging.() {
-        jniLibs.useLegacyPackaging = true
-    }
-
     defaultConfig {
         applicationId = "com.dibe.eduhive"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -43,14 +38,27 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_11)
-        }
-    }
+
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs.useLegacyPackaging = true
+
+        resources {
+            excludes += setOf(
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/LICENSE.md",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/NOTICE.md",
+                "META-INF/DEPENDENCIES"
+            )
+        }
+    }
+
 }
 
 dependencies {
@@ -65,6 +73,7 @@ dependencies {
 
 //    hilt
     implementation(libs.hilt.android)
+    implementation(libs.androidx.compose.ui.text.google.fonts)
     ksp(libs.hilt.android.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
@@ -77,12 +86,17 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
 //    File extraction libraries
-    implementation(libs.pdfbox.android)
-    implementation(libs.poi.ooxml)
     implementation(libs.mlkit.text.recognition)
+
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
 //    Optional: Web scraping (v1.1)
     implementation(libs.jsoup)
+
+//    data store
+    implementation("androidx.datastore:datastore-preferences:1.2.0")
+
+    implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

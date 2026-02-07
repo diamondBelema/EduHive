@@ -54,17 +54,17 @@ class QuizRepositoryImpl @Inject constructor(
     /**
      * NEW: Generate quiz for a concept using AI.
      */
-    suspend fun generateQuizForConcept(
+    override suspend fun generateQuizForConcept(
         conceptId: String,
         conceptName: String,
         conceptDescription: String?,
-        questionCount: Int = 5
+        questionCount: Int
     ): Pair<Quiz, List<QuizQuestion>> {
         // Use AI to generate questions
-        val generated = aiDataSource.generateQuizQuestions(
+        val result = aiDataSource.generateQuiz(
             conceptName = conceptName,
-            conceptDescription = conceptDescription,
-            count = questionCount
+            conceptDescription = conceptDescription ?: "",
+            questionCount = questionCount
         )
 
         // Create quiz
@@ -76,12 +76,17 @@ class QuizRepositoryImpl @Inject constructor(
             createdAt = System.currentTimeMillis()
         )
 
+        val extractedQuiz = result.getOrElse { error ->
+            // You can log this later if you want
+            return Pair(quiz, emptyList())
+        }
+
         // Convert generated questions to domain models
-        val questions = generated.map { gen ->
+        val questions = extractedQuiz.map { gen ->
             QuizQuestion(
                 id = UUID.randomUUID().toString(),
                 quizId = quizId,
-                question = gen.question,
+                question = gen.text,
                 type = when (gen.type.uppercase()) {
                     "MCQ" -> QuizQuestionType.MCQ
                     "TRUE_FALSE" -> QuizQuestionType.TRUE_FALSE

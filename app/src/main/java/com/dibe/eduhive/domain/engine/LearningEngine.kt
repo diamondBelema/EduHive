@@ -3,6 +3,7 @@ package com.dibe.eduhive.domain.engine
 import com.dibe.eduhive.domain.model.Concept
 import com.dibe.eduhive.domain.model.evidence.FlashcardEvidence
 import com.dibe.eduhive.domain.model.evidence.QuizEvidence
+import jakarta.inject.Inject
 
 /**
  * Learning Engine orchestrates confidence updates.
@@ -18,7 +19,7 @@ import com.dibe.eduhive.domain.model.evidence.QuizEvidence
  * - Testable in isolation
  * - Offline-friendly (pure computation)
  */
-class LearningEngine(
+class LearningEngine (
     private val strategy: ConfidenceUpdateStrategy
 ) {
 

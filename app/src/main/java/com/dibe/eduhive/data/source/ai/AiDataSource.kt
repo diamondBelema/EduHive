@@ -1,275 +1,285 @@
 package com.dibe.eduhive.data.source.ai
 
 import com.runanywhere.sdk.public.RunAnywhere
-import com.runanywhere.sdk.public.extensions.*
 import com.runanywhere.sdk.public.extensions.LLM.LLMGenerationOptions
+import com.runanywhere.sdk.public.extensions.chat
+import com.runanywhere.sdk.public.extensions.generate
+import com.runanywhere.sdk.public.extensions.generateStream
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
- * AI Data Source using Run Anywhere SDK for offline LLM inference.
+ * AI Data Source using Run Anywhere SDK.
+ *
  * Handles:
- * - Concept extraction from materials
- * - Flashcard generation from concepts
- * - Quiz question generation from concepts
+ * - Concept extraction from text
+ * - Flashcard generation
+ * - Quiz generation
  */
-class AIDataSource(
-    private val modelId: String
+@Singleton
+class AIDataSource @Inject constructor(
+    private val modelManager: AIModelManager
 ) {
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
-
     /**
-     * Extract concepts from study material text.
-     * Returns a list of concept names and descriptions.
+     * Extract concepts from material text.
+     * Uses streaming for progress tracking.
      */
     suspend fun extractConcepts(
-        materialText: String,
+        text: String,
         hiveContext: String = ""
-    ): List<ExtractedConcept> {
-        val prompt = buildConceptExtractionPrompt(materialText, hiveContext)
+    ): Result<List<ExtractedConcept>> {
+        return try {
+            // Check if model is loaded
+            if (!modelManager.isModelLoaded()) {
+                val modelId = modelManager.getActiveModel()
+                    ?: return Result.failure(IllegalStateException("No model available"))
+                modelManager.loadModel(modelId)
+            }
 
-        val result = RunAnywhere.generate(
-            prompt = prompt,
-            options = LLMGenerationOptions(
-                maxTokens = 1000,
-                temperature = 0.3f  // Lower temperature for more focused extraction
+            val prompt = buildConceptExtractionPrompt(text, hiveContext)
+
+            val result = RunAnywhere.generate(
+                prompt = prompt,
+                options = LLMGenerationOptions(
+                    maxTokens = 500,
+                    temperature = 0.3f,  // Lower for more precise extraction
+                    systemPrompt = """
+                        You are an educational content analyzer.
+                        Extract only the most important concepts from the text.
+                        Be precise and concise.
+                    """.trimIndent()
+                )
             )
-        )
 
-        return parseConceptsFromResponse(result.text)
+            val concepts = parseConceptsFromResponse(result.text)
+            Result.success(concepts)
+
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     /**
-     * Generate flashcards for a specific concept.
-     * Returns multiple flashcard pairs (front/back).
+     * Extract concepts with streaming progress.
+     */
+    fun extractConceptsStream(
+        text: String,
+        hiveContext: String = ""
+    ): Flow<String> {
+        val prompt = buildConceptExtractionPrompt(text, hiveContext)
+
+        return RunAnywhere.generateStream(prompt)
+    }
+
+    /**
+     * Generate flashcards for a concept.
      */
     suspend fun generateFlashcards(
         conceptName: String,
-        conceptDescription: String?,
+        conceptDescription: String,
         count: Int = 5
-    ): List<GeneratedFlashcard> {
-        val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
+    ): Result<List<GeneratedFlashcard>> {
+        return try {
+            if (!modelManager.isModelLoaded()) {
+                val modelId = modelManager.getActiveModel()
+                    ?: return Result.failure(IllegalStateException("No model available"))
+                modelManager.loadModel(modelId)
+            }
 
-        val result = RunAnywhere.generate(
-            prompt = prompt,
-            options = LLMGenerationOptions(
-                maxTokens = 800,
-                temperature = 0.5f  // Moderate creativity
+            val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
+
+            val result = RunAnywhere.generate(
+                prompt = prompt,
+                options = LLMGenerationOptions(
+                    maxTokens = 800,
+                    temperature = 0.5f,
+                    systemPrompt = """
+                        You are a flashcard creator.
+                        Create clear, educational flashcards.
+                        Questions should test understanding, not just memory.
+                    """.trimIndent()
+                )
             )
-        )
 
-        return parseFlashcardsFromResponse(result.text)
+            val flashcards = parseFlashcardsFromResponse(result.text)
+            Result.success(flashcards)
+
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     /**
      * Generate quiz questions for a concept.
-     * Returns MCQ, True/False, and Short Answer questions.
      */
-    suspend fun generateQuizQuestions(
+    suspend fun generateQuiz(
         conceptName: String,
-        conceptDescription: String?,
-        count: Int = 5
-    ): List<GeneratedQuizQuestion> {
-        val prompt = buildQuizPrompt(conceptName, conceptDescription, count)
+        conceptDescription: String,
+        questionCount: Int = 5
+    ): Result<List<GeneratedQuizQuestion>> {
+        return try {
+            if (!modelManager.isModelLoaded()) {
+                val modelId = modelManager.getActiveModel()
+                    ?: return Result.failure(IllegalStateException("No model available"))
+                modelManager.loadModel(modelId)
+            }
 
-        val result = RunAnywhere.generate(
-            prompt = prompt,
-            options = LLMGenerationOptions(
-                maxTokens = 1000,
-                temperature = 0.4f
+            val prompt = buildQuizPrompt(conceptName, conceptDescription, questionCount)
+
+            val result = RunAnywhere.generate(
+                prompt = prompt,
+                options = LLMGenerationOptions(
+                    maxTokens = 1000,
+                    temperature = 0.4f,
+                    systemPrompt = """
+                        You are a quiz creator.
+                        Create challenging but fair quiz questions.
+                        Include MCQ, True/False, and short answer questions.
+                    """.trimIndent()
+                )
             )
-        )
 
-        return parseQuizQuestionsFromResponse(result.text)
+            val questions = parseQuizFromResponse(result.text)
+            Result.success(questions)
+
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     /**
-     * Stream concept extraction with progress.
+     * Simple chat (for testing or simple queries).
      */
-    fun extractConceptsStream(
-        materialText: String,
-        hiveContext: String = ""
-    ): Flow<String> = flow {
-        val prompt = buildConceptExtractionPrompt(materialText, hiveContext)
+    suspend fun chat(message: String): Result<String> {
+        return try {
+            if (!modelManager.isModelLoaded()) {
+                val modelId = modelManager.getActiveModel()
+                    ?: return Result.failure(IllegalStateException("No model available"))
+                modelManager.loadModel(modelId)
+            }
 
-        RunAnywhere.generateStream(prompt).collect { token ->
-            emit(token)
+            val response = RunAnywhere.chat(message)
+            Result.success(response)
+
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
-    // ========== PROMPT BUILDERS ==========
+    // ========== PRIVATE HELPER METHODS ==========
 
     private fun buildConceptExtractionPrompt(text: String, context: String): String {
         return """
-You are an expert study assistant. Extract key concepts from the following study material.
-
-${if (context.isNotEmpty()) "Context: This material is from a course on $context.\n" else ""}
-
-For each concept, provide:
-1. A clear name (2-5 words)
-2. A brief description (1-2 sentences)
-
-Format your response as JSON array:
-[
-  {"name": "Concept Name", "description": "Brief description"},
-  ...
-]
-
-Study Material:
-$text
-
-Respond ONLY with valid JSON array, no additional text.
+            Extract 3-10 key concepts from this educational material.
+            ${if (context.isNotEmpty()) "Context: $context\n" else ""}
+            
+            Material:
+            $text
+            
+            For each concept, provide:
+            1. Name (2-5 words)
+            2. Description (1-2 sentences)
+            
+            Format your response EXACTLY like this:
+            
+            CONCEPT: Mitochondria Function
+            DESCRIPTION: Organelles that produce ATP through cellular respiration, known as the powerhouse of the cell.
+            
+            CONCEPT: DNA Structure
+            DESCRIPTION: Double helix structure containing genetic information made of nucleotides.
+            
+            Do not include any other text.
         """.trimIndent()
     }
 
-    private fun buildFlashcardPrompt(
-        conceptName: String,
-        description: String?,
-        count: Int
-    ): String {
+    private fun buildFlashcardPrompt(name: String, description: String, count: Int): String {
         return """
-Create $count flashcards to help students learn about: $conceptName
-
-${description?.let { "Description: $it\n" } ?: ""}
-
-Each flashcard should:
-- Have a clear question on the front
-- Have a concise, accurate answer on the back
-- Test different aspects of the concept
-- Be suitable for spaced repetition study
-
-Format as JSON array:
-[
-  {"front": "Question text", "back": "Answer text"},
-  ...
-]
-
-Respond ONLY with valid JSON array, no additional text.
+            Create $count flashcards about: $name
+            Description: $description
+            
+            Each flashcard should have:
+            - Front: A clear question
+            - Back: A concise answer (1-3 sentences)
+            
+            Format EXACTLY like this:
+            
+            FLASHCARD 1
+            FRONT: What is the primary function of mitochondria?
+            BACK: To produce ATP through cellular respiration.
+            
+            FLASHCARD 2
+            FRONT: Why are mitochondria called the powerhouse of the cell?
+            BACK: Because they generate most of the cell's energy in the form of ATP.
+            
+            Create all $count flashcards now.
         """.trimIndent()
     }
 
-    private fun buildQuizPrompt(
-        conceptName: String,
-        description: String?,
-        count: Int
-    ): String {
+    private fun buildQuizPrompt(name: String, description: String, count: Int): String {
         return """
-Create $count quiz questions about: $conceptName
-
-${description?.let { "Description: $it\n" } ?: ""}
-
-Include a mix of:
-- Multiple choice questions (MCQ) with 4 options
-- True/False questions
-- Short answer questions
-
-Format as JSON array:
-[
-  {
-    "type": "MCQ",
-    "question": "Question text",
-    "correctAnswer": "Correct answer",
-    "options": ["Option 1", "Option 2", "Option 3", "Option 4"]
-  },
-  {
-    "type": "TRUE_FALSE",
-    "question": "Statement",
-    "correctAnswer": "true" or "false"
-  },
-  {
-    "type": "SHORT_ANSWER",
-    "question": "Question",
-    "correctAnswer": "Expected answer"
-  }
-]
-
-Respond ONLY with valid JSON array, no additional text.
+            Create $count quiz questions about: $name
+            Description: $description
+            
+            Format EXACTLY like this:
+            
+            QUESTION 1
+            TYPE: MCQ
+            TEXT: What molecule does mitochondria produce?
+            OPTION A: ATP
+            OPTION B: DNA
+            OPTION C: RNA
+            OPTION D: Glucose
+            CORRECT: A
+            
+            QUESTION 2
+            TYPE: TRUE_FALSE
+            TEXT: Mitochondria contain their own DNA.
+            CORRECT: TRUE
+            
+            Create all $count questions now.
         """.trimIndent()
     }
-
-    // ========== RESPONSE PARSERS ==========
 
     private fun parseConceptsFromResponse(response: String): List<ExtractedConcept> {
-        return try {
-            val cleanResponse = extractJsonArray(response)
-            json.decodeFromString<List<ExtractedConcept>>(cleanResponse)
-        } catch (e: Exception) {
-            // Fallback: manual parsing if JSON fails
-            parseConceptsManually(response)
-        }
-    }
-
-    private fun parseFlashcardsFromResponse(response: String): List<GeneratedFlashcard> {
-        return try {
-            val cleanResponse = extractJsonArray(response)
-            json.decodeFromString<List<GeneratedFlashcard>>(cleanResponse)
-        } catch (e: Exception) {
-            parseFlashcardsManually(response)
-        }
-    }
-
-    private fun parseQuizQuestionsFromResponse(response: String): List<GeneratedQuizQuestion> {
-        return try {
-            val cleanResponse = extractJsonArray(response)
-            json.decodeFromString<List<GeneratedQuizQuestion>>(cleanResponse)
-        } catch (e: Exception) {
-            parseQuizQuestionsManually(response)
-        }
-    }
-
-    // ========== HELPERS ==========
-
-    private fun extractJsonArray(text: String): String {
-        val start = text.indexOf('[')
-        val end = text.lastIndexOf(']')
-
-        return if (start != -1 && end != -1 && end > start) {
-            text.substring(start, end + 1)
-        } else {
-            text
-        }
-    }
-
-    private fun parseConceptsManually(text: String): List<ExtractedConcept> {
-        // Fallback parser if JSON fails
         val concepts = mutableListOf<ExtractedConcept>()
+        val lines = response.lines()
 
-        // Look for patterns like "1. Concept Name: Description"
-        val regex = Regex("""(\d+)\.\s*([^:]+):\s*(.+?)(?=\d+\.|$)""", RegexOption.DOT_MATCHES_ALL)
+        var currentName: String? = null
 
-        regex.findAll(text).forEach { match ->
-            val name = match.groupValues[2].trim()
-            val description = match.groupValues[3].trim()
-            concepts.add(ExtractedConcept(name, description))
+        for (line in lines) {
+            when {
+                line.startsWith("CONCEPT:", ignoreCase = true) -> {
+                    currentName = line.substringAfter(":").trim()
+                }
+                line.startsWith("DESCRIPTION:", ignoreCase = true) && currentName != null -> {
+                    val description = line.substringAfter(":").trim()
+                    concepts.add(ExtractedConcept(currentName, description))
+                    currentName = null
+                }
+            }
         }
 
         return concepts
     }
 
-    private fun parseFlashcardsManually(text: String): List<GeneratedFlashcard> {
+    private fun parseFlashcardsFromResponse(response: String): List<GeneratedFlashcard> {
         val flashcards = mutableListOf<GeneratedFlashcard>()
+        val lines = response.lines()
 
-        // Look for Q:/A: patterns or Front:/Back: patterns
-        val lines = text.lines()
-        var currentFront = ""
+        var currentFront: String? = null
 
-        lines.forEach { line ->
+        for (line in lines) {
             when {
-                line.startsWith("Q:") || line.startsWith("Front:") -> {
+                line.startsWith("FRONT:", ignoreCase = true) -> {
                     currentFront = line.substringAfter(":").trim()
                 }
-                line.startsWith("A:") || line.startsWith("Back:") -> {
+                line.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
                     val back = line.substringAfter(":").trim()
-                    if (currentFront.isNotEmpty()) {
-                        flashcards.add(GeneratedFlashcard(currentFront, back))
-                        currentFront = ""
-                    }
+                    flashcards.add(GeneratedFlashcard(currentFront, back))
+                    currentFront = null
                 }
             }
         }
@@ -277,30 +287,27 @@ Respond ONLY with valid JSON array, no additional text.
         return flashcards
     }
 
-    private fun parseQuizQuestionsManually(text: String): List<GeneratedQuizQuestion> {
-        // Simplified fallback - just extract questions
-        return emptyList()
+    private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
+        // Simplified parsing - can be improved
+        return emptyList()  // TODO: Implement quiz parsing
     }
 }
 
-// ========== DATA MODELS ==========
+// ========== DATA CLASSES ==========
 
-@Serializable
 data class ExtractedConcept(
     val name: String,
     val description: String
 )
 
-@Serializable
 data class GeneratedFlashcard(
     val front: String,
     val back: String
 )
 
-@Serializable
 data class GeneratedQuizQuestion(
-    val type: String,  // "MCQ", "TRUE_FALSE", "SHORT_ANSWER"
-    val question: String,
-    val correctAnswer: String,
-    val options: List<String>? = null
+    val type: String,
+    val text: String,
+    val options: List<String>?,
+    val correctAnswer: String
 )

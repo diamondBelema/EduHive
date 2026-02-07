@@ -95,23 +95,31 @@ class ConceptRepositoryImpl @Inject constructor (
         hiveId: String,
         hiveContext: String,
     ): List<Concept> {
-        // Use AI to extract concepts
-        val extracted = aiDataSource.extractConcepts(materialText, hiveContext)
 
-        // Convert to domain models
-        val concepts = extracted.map {
+        val result = aiDataSource.extractConcepts(
+            text = materialText,
+            hiveContext = hiveContext
+        )
+
+        val extractedConcepts = result.getOrElse { error ->
+            // You can log this later if you want
+            return emptyList()
+        }
+
+        val domainConcepts = extractedConcepts.map { aiConcept ->
             Concept(
                 id = UUID.randomUUID().toString(),
                 hiveId = hiveId,
-                name = it.name,
-                description = it.description,
-                confidence = 0.3 // Initial confidence: 30%
+                name = aiConcept.name,
+                description = aiConcept.description,
+                confidence = 0.3,
+                lastReviewedAt = null
             )
         }
 
-        // Save to database
-        addConcepts(concepts)
+        addConcepts(domainConcepts)
 
-        return concepts
+        return domainConcepts
     }
+
 }
