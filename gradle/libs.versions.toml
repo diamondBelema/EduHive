@@ -31,6 +31,8 @@ mockito = "5.21.0"
 robolectric = "4.16.1"
 coroutinesTest = "1.10.2"
 
+mediapipe = "0.10.32"
+
 [libraries]
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -60,7 +62,6 @@ androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-te
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
-runanywhere-sdk = { module = "io.github.sanchitmonga22:runanywhere-sdk", version.ref = "runanywhereSdk" }
 
 # OCR (Google's official library)
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkit" }
@@ -75,7 +76,7 @@ androidx-compose-ui-text-google-fonts = { group = "androidx.compose.ui", name = 
 
 # Mockito (mocking dependencies)
 mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
-mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version = "5.1.0" }
+mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version = "6.2.3" }
 
 # Robolectric (Android context in tests)
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
@@ -84,7 +85,9 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutinesTest" }
 
 # AndroidX Test
-androidx-test-core = { module = "androidx.test:core", version = "1.5.0" }
+androidx-test-core = { module = "androidx.test:core", version = "1.7.0" }
+
+mediapipe-tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipe" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

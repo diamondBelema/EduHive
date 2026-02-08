@@ -63,8 +63,6 @@ android {
 }
 
 dependencies {
-//    Run anywhere
-    implementation(libs.runanywhere.sdk)
 
 //    Kotlin coroutines (needed for SDK's Flow / suspend APIs)
     implementation(libs.kotlinx.coroutines.android)
@@ -98,6 +96,8 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.androidx.compose.material.icons.extended)
+
+    implementation(libs.mediapipe.tasks.genai)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
