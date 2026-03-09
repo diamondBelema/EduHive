@@ -47,6 +47,7 @@ class AIDataSource @Inject constructor(
         }
     }
 
+
     /**
      * Generate flashcards.
      * NO CHANGES to function signature!
@@ -96,6 +97,92 @@ class AIDataSource @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Generate quiz questions for a concept.
+     */
+    suspend fun generateQuiz(
+        conceptName: String,
+        conceptDescription: String,
+        questionCount: Int = 5
+    ): Result<List<GeneratedQuizQuestion>> {
+        return try {
+            if (!modelManager.isModelLoaded()) {
+                val modelId = modelManager.getActiveModel()
+                    ?: return Result.failure(IllegalStateException("No model available"))
+                modelManager.loadModel(modelId)
+            }
+
+            val prompt = buildQuizPrompt(conceptName, conceptDescription, questionCount)
+
+            // Using modelManager.generate() to stay consistent with your new pattern
+            val response = modelManager.generate(
+                prompt = prompt,
+                temperature = 0.4f,
+                maxTokens = 1000
+            ).getOrThrow()
+
+            val questions = parseQuizFromResponse(response)
+            Result.success(questions)
+
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun buildQuizPrompt(name: String, description: String, count: Int): String {
+        return """
+            Create $count quiz questions about: $name
+            Description: $description
+            
+            Format EXACTLY like this:
+            
+            QUESTION 1
+            TYPE: MCQ
+            TEXT: What molecule does mitochondria produce?
+            OPTION A: ATP
+            OPTION B: DNA
+            OPTION C: RNA
+            OPTION D: Glucose
+            CORRECT: A
+            
+            QUESTION 2
+            TYPE: TRUE_FALSE
+            TEXT: Mitochondria contain their own DNA.
+            CORRECT: TRUE
+            
+            Create all $count questions now.
+        """.trimIndent()
+    }
+
+    private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
+        val questions = mutableListOf<GeneratedQuizQuestion>()
+        val blocks = response.split(Regex("QUESTION \\d+"))
+
+        for (block in blocks) {
+            if (block.isBlank()) continue
+
+            val lines = block.trim().lines()
+            var type = ""
+            var text = ""
+            val options = mutableListOf<String>()
+            var correct = ""
+
+            for (line in lines) {
+                when {
+                    line.startsWith("TYPE:", true) -> type = line.substringAfter(":").trim()
+                    line.startsWith("TEXT:", true) -> text = line.substringAfter(":").trim()
+                    line.startsWith("OPTION", true) -> options.add(line.substringAfter(":").trim())
+                    line.startsWith("CORRECT:", true) -> correct = line.substringAfter(":").trim()
+                }
+            }
+
+            if (text.isNotEmpty()) {
+                questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, correct))
+            }
+        }
+        return questions
     }
 
     // ========== UNCHANGED METHODS ==========
@@ -196,4 +283,11 @@ data class ExtractedConcept(
 data class GeneratedFlashcard(
     val front: String,
     val back: String
+)
+
+data class GeneratedQuizQuestion(
+    val type: String,
+    val text: String,
+    val options: List<String>?,
+    val correctAnswer: String
 )

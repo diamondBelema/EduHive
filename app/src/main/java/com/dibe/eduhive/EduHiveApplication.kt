@@ -2,6 +2,7 @@ package com.dibe.eduhive
 
 import android.app.Application
 import android.util.Log
+import com.ketch.Ketch
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
@@ -13,36 +14,38 @@ class EduHiveApplication : Application() {
         private const val TAG = "EduHive"
     }
 
+    private lateinit var ketch: Ketch
     override fun onCreate() {
         super.onCreate()
 
-        // MediaPipe doesn't need SDK initialization!
-        // Just create storage directories
-        setupStorageDirectories()
+        // Create models directory
+        setupModelStorage()
+
+        ketch = Ketch.builder().build(this)
 
         // Initialize PDFBox
         PDFBoxResourceLoader.init(this)
 
-        Log.d(TAG, "EduHive initialized successfully")
+        Log.d(TAG, "✅ EduHive initialized successfully")
     }
 
-    private fun setupStorageDirectories() {
+    private fun setupModelStorage() {
         try {
-            // Create models directory
             val modelsDir = File(filesDir, "models")
             if (!modelsDir.exists()) {
-                modelsDir.mkdirs()
-                Log.d(TAG, "Created models directory: ${modelsDir.absolutePath}")
+                val created = modelsDir.mkdirs()
+                Log.d(TAG, "Models directory created: $created")
             }
 
             Log.d(TAG, """
-                Storage Ready:
-                - Models: ${modelsDir.absolutePath}
+                Storage Setup:
+                - Path: ${modelsDir.absolutePath}
+                - Writable: ${modelsDir.canWrite()}
                 - Free Space: ${filesDir.freeSpace / (1024 * 1024)}MB
             """.trimIndent())
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to setup directories", e)
+            Log.e(TAG, "Failed to create models directory", e)
         }
     }
 }

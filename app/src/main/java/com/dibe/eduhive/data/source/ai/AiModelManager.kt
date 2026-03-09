@@ -2,24 +2,25 @@ package com.dibe.eduhive.data.source.ai
 
 import android.content.Context
 import android.util.Log
+import com.dibe.eduhive.R
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.ketch.DownloadConfig
+import com.ketch.Ketch
+import com.ketch.NotificationConfig
+import com.ketch.Status
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.properties.Delegates
 
 /**
- * MediaPipe-based AI Model Manager with HTTP download.
+ * AI Model Manager using MediaPipe + Ketch.
  *
- * Drop-in replacement for Run Anywhere SDK.
- * Provides same interface, same UX, but MORE RELIABLE!
+ * - MediaPipe for inference
+ * - Ketch for downloading models with progress
  */
 @Singleton
 class AIModelManager @Inject constructor(
@@ -31,27 +32,40 @@ class AIModelManager @Inject constructor(
         const val TAG = "AIModelManager"
 
         // Available models
-        const val MODEL_GEMMA_2B = "gemma-2b"
-        const val MODEL_PHI_2 = "phi-2"
-        const val MODEL_STABLELM = "stablelm-1.6b"
+        const val MODEL_GEMMA3_270M = "gemma3-270m"
+        const val MODEL_QWEN = "Qwen2.5-0.5B"
+        const val MODEL_SMOLLM_135M = "SmolLM-135M"
 
-        // Direct download URLs (Google Cloud Storage)
-        private const val GEMMA_2B_URL = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-gpu-int4/gemma-2b-it-gpu-int4.bin"
-        private const val PHI_2_URL = "https://storage.googleapis.com/mediapipe-models/llm_inference/phi-2-gpu-int4/phi-2-gpu-int4.bin"
-        private const val STABLELM_URL = "https://storage.googleapis.com/mediapipe-models/llm_inference/stablelm-2-zephyr-1_6b-int4/stablelm-2-zephyr-1_6b-int4.bin"
+        // HuggingFace URLs
+        private const val QWEN_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
+        private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
+        private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q4_0-web.task?download=true"
     }
 
-    var topK by Delegates.notNull<Int>()
     private var llmInference: LlmInference? = null
+
+    // Initialize Ketch with LONGER timeout
+    private var ketch: Ketch = Ketch.builder()
+        .setNotificationConfig(
+            config = NotificationConfig(
+                enabled = true,
+                smallIcon = R.drawable.ic_launcher_foreground
+            )
+        ).setDownloadConfig(
+            config = DownloadConfig(
+                connectTimeOutInMs = 60_000L, //Default: 10000L
+                readTimeOutInMs = 300_000L //Default: 10000L
+            )
+        )
+        .build(context)
 
     /**
      * Check if model is ready.
-     * Same signature as Run Anywhere!
      */
     suspend fun hasModelReady(): Boolean {
         val modelId = modelPreferences.getActiveModel() ?: return false
         val modelFile = getModelFile(modelId)
-        return modelFile.exists() && llmInference != null
+        return modelFile.exists() && modelFile.length() > 0
     }
 
     /**
@@ -62,9 +76,9 @@ class AIModelManager @Inject constructor(
         val maxMemoryMB = runtime.maxMemory() / (1024 * 1024)
 
         return when {
-            maxMemoryMB > 4000 -> getModelInfo(MODEL_GEMMA_2B)
-            maxMemoryMB > 2000 -> getModelInfo(MODEL_PHI_2)
-            else -> getModelInfo(MODEL_STABLELM)
+            maxMemoryMB > 4000 -> getModelInfo(MODEL_GEMMA3_270M)
+            maxMemoryMB > 2000 -> getModelInfo(MODEL_QWEN)
+            else -> getModelInfo(MODEL_SMOLLM_135M)
         }
     }
 
@@ -73,15 +87,14 @@ class AIModelManager @Inject constructor(
      */
     fun getAvailableModels(): List<ModelInfo> {
         return listOf(
-            getModelInfo(MODEL_STABLELM),  // Smallest first
-            getModelInfo(MODEL_PHI_2),
-            getModelInfo(MODEL_GEMMA_2B)
+            getModelInfo(MODEL_SMOLLM_135M),  // Smallest first
+            getModelInfo(MODEL_QWEN),
+            getModelInfo(MODEL_GEMMA3_270M)
         )
     }
 
     /**
-     * Download model with progress.
-     * SAME INTERFACE as Run Anywhere!
+     * Download model using Ketch.
      */
     fun downloadModel(modelId: String): Flow<ModelDownloadProgress> = flow {
         val modelInfo = getModelInfo(modelId)
@@ -90,85 +103,151 @@ class AIModelManager @Inject constructor(
         emit(ModelDownloadProgress.Started(modelId))
 
         try {
-            // Create models directory
+            // Create models directory if needed
             modelFile.parentFile?.mkdirs()
+
+            // Check if already downloaded
+            if (modelFile.exists() && modelFile.length() > 0) {
+                Log.d(TAG, "Model already exists: ${modelFile.absolutePath}")
+                modelPreferences.setModelDownloaded(modelId, true)
+                modelPreferences.setActiveModel(modelId)
+                emit(ModelDownloadProgress.Complete(modelId))
+                return@flow
+            }
 
             emit(ModelDownloadProgress.Registered(modelId))
 
-            // Download file
-            withContext(Dispatchers.IO) {
-                val url = URL(modelInfo.url)
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 30000
-                connection.readTimeout = 30000
-                connection.connect()
+            Log.d(TAG, "Starting download from: ${modelInfo.url}")
+            Log.d(TAG, "Saving to: ${modelFile.absolutePath}")
 
-                val responseCode = connection.responseCode
-                if (responseCode != HttpURLConnection.HTTP_OK) {
-                    throw Exception("Server returned HTTP $responseCode")
-                }
+            // Start download
+            val downloadId = ketch.download(
+                url = modelInfo.url,
+                path = modelFile.parent!!,
+                fileName = modelFile.name,
+                tag = modelId,  // Add tag for easier identification
+                metaData = modelInfo.name  // Add metadata
+            )
 
-                val totalBytes = connection.contentLengthLong
-                val inputStream = connection.inputStream
-                val outputStream = FileOutputStream(modelFile)
+            Log.d(TAG, "Download started with ID: $downloadId")
 
-                val buffer = ByteArray(8192)
-                var downloadedBytes = 0L
-                var bytesRead: Int
+            // Observe download progress
+            ketch.observeDownloadById(downloadId).collect { downloadModel ->
+                Log.d(TAG, "Status: ${downloadModel.status}, Progress: ${downloadModel.progress}%")
 
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    outputStream.write(buffer, 0, bytesRead)
-                    downloadedBytes += bytesRead
+                when (downloadModel.status) {
+                    Status.QUEUED -> {
+                        Log.d(TAG, "Download queued")
+                        emit(ModelDownloadProgress.Downloading(0, modelInfo.sizeBytes, 0))
+                    }
 
-                    val progress = downloadedBytes.toFloat() / totalBytes
-                    emit(
-                        ModelDownloadProgress.Downloading(
-                            progress = progress,
-                            totalBytes = totalBytes,
-                            downloadedBytes = downloadedBytes
+                    Status.STARTED -> {
+                        Log.d(TAG, "Download started")
+                        emit(ModelDownloadProgress.Downloading(0, modelInfo.sizeBytes, 0))
+                    }
+
+                    Status.PROGRESS -> {
+                        val progress = downloadModel.progress
+                        val totalBytes = downloadModel.total
+                        val downloadedBytes = (totalBytes * progress / 100f).toLong()
+
+                        Log.d(TAG, "Downloading: $progress% (${downloadedBytes / (1024 * 1024)}MB / ${totalBytes / (1024 * 1024)}MB)")
+
+                        emit(
+                            ModelDownloadProgress.Downloading(
+                                progressPercentage = progress,
+                                totalBytes = totalBytes,
+                                downloadedBytes = downloadedBytes
+                            )
                         )
-                    )
-                }
+                    }
 
-                outputStream.close()
-                inputStream.close()
-                connection.disconnect()
+                    Status.SUCCESS -> {
+                        Log.d(TAG, "Download complete!")
+
+                        // Verify file exists and has content
+                        if (modelFile.exists() && modelFile.length() > 0) {
+                            Log.d(TAG, "File verified: ${modelFile.length() / (1024 * 1024)}MB")
+                            modelPreferences.setModelDownloaded(modelId, true)
+                            modelPreferences.setActiveModel(modelId)
+                            emit(ModelDownloadProgress.Complete(modelId))
+                        } else {
+                            Log.e(TAG, "File missing or empty after download!")
+                            emit(ModelDownloadProgress.Failed("Downloaded file is empty or missing"))
+                        }
+                    }
+
+                    Status.FAILED -> {
+                        val reason = downloadModel.failureReason ?: "Unknown error"
+                        Log.e(TAG, "Download failed: $reason")
+
+                        // Clean up failed download
+                        if (modelFile.exists()) {
+                            modelFile.delete()
+                            Log.d(TAG, "Cleaned up failed download")
+                        }
+
+                        // Provide helpful error message
+                        val errorMessage = when {
+                            reason.contains("timeout", ignoreCase = true) ->
+                                "Download timed out. Check your internet connection and try again."
+                            reason.contains("network", ignoreCase = true) ->
+                                "Network error. Please check your connection."
+                            reason.contains("space", ignoreCase = true) ->
+                                "Not enough storage space. Free up ${modelInfo.sizeMB.toInt()}MB and try again."
+                            else -> "Download failed: $reason"
+                        }
+
+                        emit(ModelDownloadProgress.Failed(errorMessage))
+                    }
+
+                    Status.PAUSED -> {
+                        Log.d(TAG, "Download paused")
+                    }
+
+                    Status.CANCELLED -> {
+                        Log.d(TAG, "Download cancelled")
+                        if (modelFile.exists()) {
+                            modelFile.delete()
+                        }
+                        emit(ModelDownloadProgress.Failed("Download cancelled"))
+                    }
+
+                    else -> {
+                        Log.d(TAG, "Unknown status: ${downloadModel.status}")
+                    }
+                }
             }
 
-            // Mark as downloaded
-            modelPreferences.setModelDownloaded(modelId, true)
-            modelPreferences.setActiveModel(modelId)
-
-            emit(ModelDownloadProgress.Complete(modelId))
-
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed", e)
+            Log.e(TAG, "Download exception", e)
 
-            // Clean up partial download
+            // Clean up on error
             if (modelFile.exists()) {
                 modelFile.delete()
             }
 
-            emit(ModelDownloadProgress.Failed(e.message ?: "Download failed"))
+            emit(ModelDownloadProgress.Failed(
+                e.message ?: "Download failed with unknown error"
+            ))
         }
     }
 
     /**
-     * Load model into memory.
-     * SAME SIGNATURE as Run Anywhere!
+     * Load model into memory using MediaPipe.
      */
     suspend fun loadModel(modelId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val modelFile = getModelFile(modelId)
 
-            if (!modelFile.exists()) {
+            if (!modelFile.exists() || modelFile.length() == 0L) {
                 return@withContext Result.failure(
-                    IllegalStateException("Model not downloaded: $modelId")
+                    IllegalStateException("Model not downloaded or file is empty: $modelId")
                 )
             }
 
             Log.d(TAG, "Loading model from: ${modelFile.absolutePath}")
+            Log.d(TAG, "File size: ${modelFile.length() / (1024 * 1024)}MB")
 
             // Unload existing model
             llmInference?.close()
@@ -185,7 +264,7 @@ class AIModelManager @Inject constructor(
 
             modelPreferences.setActiveModel(modelId)
 
-            Log.d(TAG, "Model loaded successfully")
+            Log.d(TAG, "Model loaded successfully!")
             Result.success(Unit)
 
         } catch (e: Exception) {
@@ -202,7 +281,7 @@ class AIModelManager @Inject constructor(
     }
 
     /**
-     * Unload model.
+     * Unload model from memory.
      */
     suspend fun unloadModel(): Result<Unit> {
         return try {
@@ -215,8 +294,7 @@ class AIModelManager @Inject constructor(
     }
 
     /**
-     * Generate text.
-     * Used internally by AIDataSource.
+     * Generate text using MediaPipe.
      */
     suspend fun generate(
         prompt: String,
@@ -229,7 +307,10 @@ class AIModelManager @Inject constructor(
                     IllegalStateException("No model loaded")
                 )
 
+            Log.d(TAG, "Generating response...")
             val response = inference.generateResponse(prompt)
+            Log.d(TAG, "Generation complete: ${response.length} chars")
+
             Result.success(response)
 
         } catch (e: Exception) {
@@ -246,10 +327,22 @@ class AIModelManager @Inject constructor(
     }
 
     /**
-     * Get model file.
+     * Cancel ongoing download.
+     */
+    suspend fun cancelDownload(modelId: String) {
+        // Find and cancel the download
+        val modelFile = getModelFile(modelId)
+        if (modelFile.exists() && !modelPreferences.isModelDownloaded(modelId)) {
+            modelFile.delete()
+            Log.d(TAG, "Cancelled and cleaned up incomplete download")
+        }
+    }
+
+    /**
+     * Get model file path.
      */
     private fun getModelFile(modelId: String): File {
-        return File(context.filesDir, "models/${modelId}.bin")
+        return File(context.filesDir, "models/${modelId}.task")  // Changed to .task extension
     }
 
     /**
@@ -257,32 +350,32 @@ class AIModelManager @Inject constructor(
      */
     private fun getModelInfo(modelId: String): ModelInfo {
         return when (modelId) {
-            MODEL_GEMMA_2B -> ModelInfo(
-                id = MODEL_GEMMA_2B,
-                name = "Gemma 2B",
+            MODEL_QWEN -> ModelInfo(
+                id = MODEL_QWEN,
+                name = "Qwen 2.5 0.5B",
                 description = "Best quality, slower",
-                url = GEMMA_2B_URL,
-                sizeBytes = 1_600_000_000L,  // 1.6GB
-                tokensPerSecond = 20,
-                recommended = false
-            )
-
-            MODEL_PHI_2 -> ModelInfo(
-                id = MODEL_PHI_2,
-                name = "Phi-2",
-                description = "Balanced performance",
-                url = PHI_2_URL,
-                sizeBytes = 1_200_000_000L,  // 1.2GB
+                url = QWEN_URL,
+                sizeBytes = 547_000_000L,  // 547MB
                 tokensPerSecond = 30,
                 recommended = true
             )
 
-            MODEL_STABLELM -> ModelInfo(
-                id = MODEL_STABLELM,
-                name = "StableLM 1.6B",
+            MODEL_GEMMA3_270M -> ModelInfo(
+                id = MODEL_GEMMA3_270M,
+                name = "Gemma 3 270M",
+                description = "Balanced performance",
+                url = GEMMA3_270M_URL,
+                sizeBytes = 249_000_000L,  // 249MB
+                tokensPerSecond = 20,
+                recommended = false
+            )
+
+            MODEL_SMOLLM_135M -> ModelInfo(
+                id = MODEL_SMOLLM_135M,
+                name = "SmolLM 135M",
                 description = "Fastest, smallest",
-                url = STABLELM_URL,
-                sizeBytes = 800_000_000L,  // 800MB
+                url = SMOLLM_135M_URL,
+                sizeBytes = 167_000_000L,  // 167MB
                 tokensPerSecond = 50,
                 recommended = false
             )
@@ -293,26 +386,25 @@ class AIModelManager @Inject constructor(
 }
 
 /**
- * Model download progress - SAME AS RUN ANYWHERE!
+ * Model download progress states.
  */
 sealed class ModelDownloadProgress {
     data class Started(val modelId: String) : ModelDownloadProgress()
     data class Registered(val registeredId: String) : ModelDownloadProgress()
     data class Downloading(
-        val progress: Float,  // 0.0 to 1.0
+        val progressPercentage: Int,
         val totalBytes: Long,
         val downloadedBytes: Long
     ) : ModelDownloadProgress() {
-        val progressPercentage: Int get() = (progress * 100).toInt()
-        val downloadedMB: Float get() = downloadedBytes / (1024f * 1024f)
         val totalMB: Float get() = totalBytes / (1024f * 1024f)
+        val downloadedMB: Float get() = downloadedBytes / (1024f * 1024f)
     }
     data class Complete(val modelId: String) : ModelDownloadProgress()
     data class Failed(val error: String) : ModelDownloadProgress()
 }
 
 /**
- * Model info - SAME AS RUN ANYWHERE!
+ * Model information.
  */
 data class ModelInfo(
     val id: String,

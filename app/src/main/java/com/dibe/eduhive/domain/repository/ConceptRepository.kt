@@ -24,7 +24,7 @@ interface ConceptRepository {
 
     /**
      * Get average confidence across all concepts in a hive.
-     * Used for overall progress tracking.
+     * Used for overall progressPercentage tracking.
      */
     suspend fun getAverageConfidence(hiveId: String): Double?
 

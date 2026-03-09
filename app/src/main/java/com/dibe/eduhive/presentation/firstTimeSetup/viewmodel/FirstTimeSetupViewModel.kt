@@ -103,7 +103,7 @@ class FirstTimeSetupViewModel @Inject constructor(
                     is ModelDownloadProgress.Downloading -> {
                         _state.update {
                             it.copy(
-                                downloadProgress = progress.progress,
+                                downloadProgress = progress.progressPercentage / 100f,
                                 downloadStatus = "Downloaded ${progress.downloadedMB.toInt()}MB / ${progress.totalMB.toInt()}MB",
                                 downloadedBytes = progress.downloadedBytes,
                                 totalBytes = progress.totalBytes

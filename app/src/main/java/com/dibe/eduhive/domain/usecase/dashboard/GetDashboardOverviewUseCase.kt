@@ -11,7 +11,7 @@ import javax.inject.Inject
  * Use case for getting a complete dashboard overview for a hive.
  *
  * Provides:
- * - Overall progress metrics
+ * - Overall progressPercentage metrics
  * - Weak concepts that need attention
  * - Study statistics
  * - Recent activity
