@@ -16,7 +16,7 @@ class ModelDownloader(
     override fun downloadFile(url: String, name: String): Long {
         val request = DownloadManager.Request(url.toUri())
             .setMimeType("")
-            .setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI)
+            .setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setTitle("Models")
             .setDestinationInExternalFilesDir(

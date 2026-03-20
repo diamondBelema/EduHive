@@ -1,8 +1,10 @@
 package com.dibe.eduhive.domain.repository
 
+import com.dibe.eduhive.data.repository.ConceptExtractionProgress
 import com.dibe.eduhive.domain.model.Concept
 import com.dibe.eduhive.domain.model.evidence.FlashcardEvidence
 import com.dibe.eduhive.domain.model.evidence.QuizEvidence
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Repository interface for Concept operations.
@@ -27,6 +29,12 @@ interface ConceptRepository {
      * Used for overall progressPercentage tracking.
      */
     suspend fun getAverageConfidence(hiveId: String): Double?
+
+    fun extractConceptsFromMaterialStreaming(
+        materialText: String,
+        hiveId: String,
+        hiveContext: String
+    ): Flow<ConceptExtractionProgress>
 
     /**
      * Update concept confidence based on flashcard evidence.

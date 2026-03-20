@@ -12,9 +12,7 @@ plugins {
 
 android {
     namespace = "com.dibe.eduhive"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.dibe.eduhive"
@@ -98,7 +96,6 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.mediapipe.tasks.genai)
-    implementation(libs.ketch)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

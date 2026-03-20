@@ -2,9 +2,12 @@ package com.dibe.eduhive.data.repository
 
 import com.dibe.eduhive.data.local.entity.FlashcardEntity
 import com.dibe.eduhive.data.source.ai.AIDataSource
+import com.dibe.eduhive.data.source.ai.FlashcardGenerationState
 import com.dibe.eduhive.data.source.local.FlashcardLocalDataSource
 import com.dibe.eduhive.domain.model.Flashcard
 import com.dibe.eduhive.domain.repository.FlashcardRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import java.util.UUID
 import jakarta.inject.Inject
 
@@ -39,7 +42,7 @@ class FlashcardRepositoryImpl @Inject constructor(
     ) {
         localDataSource.updateLeitner(
             id = flashcardId,
-            box = newBox.coerceIn(1, 5), // Keep within 1-5 range
+            box = newBox.coerceIn(1, 5),
             time = lastSeenAt
         )
     }
@@ -49,7 +52,52 @@ class FlashcardRepositoryImpl @Inject constructor(
     }
 
     /**
-     * NEW: Generate flashcards for a concept using AI.
+     * 🚀 STREAMING: Generate flashcards with real-time status updates.
+     */
+    override fun generateFlashcardsForConceptStreaming(
+        conceptId: String,
+        conceptName: String,
+        conceptDescription: String?,
+        count: Int
+    ): Flow<FlashcardGenerationProgress> = flow {
+        emit(FlashcardGenerationProgress.Loading)
+
+        aiDataSource.generateFlashcardsStreaming(
+            conceptName = conceptName,
+            conceptDescription = conceptDescription ?: "",
+            count = count
+        ).collect { state ->
+            when (state) {
+                is FlashcardGenerationState.Loading -> {
+                    emit(FlashcardGenerationProgress.Loading)
+                }
+                is FlashcardGenerationState.Success -> {
+                    val flashcards = state.flashcards.map { generated ->
+                        Flashcard(
+                            id = UUID.randomUUID().toString(),
+                            conceptId = conceptId,
+                            front = generated.front,
+                            back = generated.back,
+                            currentBox = 1,
+                            lastSeenAt = null,
+                            nextReviewAt = System.currentTimeMillis()
+                        )
+                    }
+
+                    // Save to database
+                    addFlashcards(flashcards)
+
+                    emit(FlashcardGenerationProgress.Success(flashcards))
+                }
+                is FlashcardGenerationState.Error -> {
+                    emit(FlashcardGenerationProgress.Error(state.message))
+                }
+            }
+        }
+    }
+
+    /**
+     * Standard suspend function (delegates to streaming internally).
      */
     override suspend fun generateFlashcardsForConcept(
         conceptId: String,
@@ -57,34 +105,31 @@ class FlashcardRepositoryImpl @Inject constructor(
         conceptDescription: String?,
         count: Int
     ): List<Flashcard> {
-        // Use AI to generate flashcards
-        val result= aiDataSource.generateFlashcards(
-            conceptName = conceptName,
-            conceptDescription = conceptDescription ?: "",
-            count = count
-        )
+        var result: List<Flashcard> = emptyList()
 
-        val extractedFlashcard = result.getOrElse { error ->
-            // You can log this later if you want
-            return emptyList()
+        generateFlashcardsForConceptStreaming(
+            conceptId, conceptName, conceptDescription, count
+        ).collect { progress ->
+            when (progress) {
+                is FlashcardGenerationProgress.Success -> {
+                    result = progress.flashcards
+                }
+                is FlashcardGenerationProgress.Error -> {
+                    // Return empty list on error
+                }
+                else -> { /* Ignore loading states */ }
+            }
         }
 
-        // Convert to domain models
-        val flashcards = extractedFlashcard.map { flashcard ->
-            Flashcard(
-                id = UUID.randomUUID().toString(),
-                conceptId = conceptId,
-                front = flashcard.front,
-                back = flashcard.back,
-                currentBox = 1, // Start in box 1
-                lastSeenAt = null,
-                nextReviewAt = System.currentTimeMillis() // Due now
-            )
-        }
-
-        // Save to database
-        addFlashcards(flashcards)
-
-        return flashcards
+        return result
     }
+}
+
+/**
+ * Progress states for flashcard generation UI.
+ */
+sealed class FlashcardGenerationProgress {
+    object Loading : FlashcardGenerationProgress()
+    data class Success(val flashcards: List<Flashcard>) : FlashcardGenerationProgress()
+    data class Error(val message: String) : FlashcardGenerationProgress()
 }

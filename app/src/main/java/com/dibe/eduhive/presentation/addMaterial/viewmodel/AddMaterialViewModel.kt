@@ -134,6 +134,15 @@ class AddMaterialViewModel @Inject constructor(
                             )
                         }
                     }
+
+                    is MaterialProcessingProgress.ExtractingConceptsProgress -> {
+                        _state.update {
+                            it.copy(
+                                processingStatus = "Analyzing content... ${progress.percent}%",
+                                progressPercentage = 40 + (progress.percent * 0.2).toInt()
+                            )
+                        }
+                    }
                 }
             }
         }

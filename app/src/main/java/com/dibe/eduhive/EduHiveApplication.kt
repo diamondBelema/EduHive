@@ -2,7 +2,6 @@ package com.dibe.eduhive
 
 import android.app.Application
 import android.util.Log
-import com.ketch.Ketch
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
@@ -14,14 +13,11 @@ class EduHiveApplication : Application() {
         private const val TAG = "EduHive"
     }
 
-    private lateinit var ketch: Ketch
     override fun onCreate() {
         super.onCreate()
 
         // Create models directory
         setupModelStorage()
-
-        ketch = Ketch.builder().build(this)
 
         // Initialize PDFBox
         PDFBoxResourceLoader.init(this)
@@ -31,7 +27,7 @@ class EduHiveApplication : Application() {
 
     private fun setupModelStorage() {
         try {
-            val modelsDir = File(filesDir, "models")
+            val modelsDir = File(getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "")
             if (!modelsDir.exists()) {
                 val created = modelsDir.mkdirs()
                 Log.d(TAG, "Models directory created: $created")

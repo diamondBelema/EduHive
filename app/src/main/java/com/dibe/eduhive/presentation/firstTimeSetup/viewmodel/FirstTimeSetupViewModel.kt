@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dibe.eduhive.data.source.ai.AIModelManager
 import com.dibe.eduhive.data.source.ai.ModelDownloadProgress
+import com.dibe.eduhive.data.source.ai.ModelPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +15,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class FirstTimeSetupViewModel @Inject constructor(
-    private val modelManager: AIModelManager
+    private val modelManager: AIModelManager,
+    private val modelPreferences: ModelPreferences
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FirstTimeSetupState())
@@ -94,7 +96,7 @@ class FirstTimeSetupViewModel @Inject constructor(
                     is ModelDownloadProgress.Registered -> {
                         _state.update {
                             it.copy(
-                                downloadStatus = "Model registered: ${progress.registeredId}",
+                                downloadStatus = "Download registered",
                                 downloadProgress = 0.05f  // 5% for registration
                             )
                         }
@@ -104,7 +106,7 @@ class FirstTimeSetupViewModel @Inject constructor(
                         _state.update {
                             it.copy(
                                 downloadProgress = progress.progressPercentage / 100f,
-                                downloadStatus = "Downloaded ${progress.downloadedMB.toInt()}MB / ${progress.totalMB.toInt()}MB",
+                                downloadStatus = "Downloading: ${progress.progressPercentage}%",
                                 downloadedBytes = progress.downloadedBytes,
                                 totalBytes = progress.totalBytes
                             )
@@ -122,6 +124,7 @@ class FirstTimeSetupViewModel @Inject constructor(
                         // Load the model after download
                         modelManager.loadModel(progress.modelId).fold(
                             onSuccess = {
+                                modelPreferences.setSetupComplete(true)
                                 _state.update {
                                     it.copy(
                                         currentStep = SetupStep.COMPLETE,
@@ -167,24 +170,27 @@ class FirstTimeSetupViewModel @Inject constructor(
     }
 
     private fun skipSetup() {
-        // Allow user to proceed without model (will prompt when needed)
-        _state.update {
-            it.copy(
-                setupNeeded = false,
-                isComplete = true,
-                skipped = true
-            )
+        viewModelScope.launch {
+            modelPreferences.setSetupComplete(true)
+            _state.update {
+                it.copy(
+                    setupNeeded = false,
+                    isComplete = true,
+                    skipped = true
+                )
+            }
         }
     }
 
     private fun completeSetup() {
-        _state.update {
-            it.copy(
-                setupNeeded = false,
-                isComplete = true
-            )
+        viewModelScope.launch {
+            modelPreferences.setSetupComplete(true)
+            _state.update {
+                it.copy(
+                    setupNeeded = false,
+                    isComplete = true
+                )
+            }
         }
     }
 }
-
-

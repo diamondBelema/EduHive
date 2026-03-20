@@ -1,6 +1,10 @@
 package com.dibe.eduhive.domain.usecase.material
 
 import android.net.Uri
+import com.dibe.eduhive.data.repository.ConceptExtractionProgress
+import com.dibe.eduhive.data.repository.ConceptRepositoryImpl
+import com.dibe.eduhive.data.repository.FlashcardGenerationProgress
+import com.dibe.eduhive.data.repository.FlashcardRepositoryImpl
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.domain.model.Material
 import com.dibe.eduhive.domain.model.MaterialType
@@ -8,15 +12,17 @@ import com.dibe.eduhive.domain.repository.ConceptRepository
 import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
+import kotlin.collections.forEachIndexed
 
 class AddMaterialUseCase @Inject constructor(
     private val fileDataSource: FileDataSource,
     private val materialRepository: MaterialRepository,
-    private val conceptRepository: ConceptRepository,
-    private val flashcardRepository: FlashcardRepository
+    private val conceptRepository: ConceptRepository, // Use Impl for streaming
+    private val flashcardRepository: FlashcardRepository // Use Impl for streaming
 ) {
 
     operator fun invoke(
@@ -24,79 +30,117 @@ class AddMaterialUseCase @Inject constructor(
         hiveId: String,
         title: String,
         hiveContext: String = ""
-    ): Flow<MaterialProcessingProgress> = flow {
-
-        emit(MaterialProcessingProgress.Started)
+    ): Flow<MaterialProcessingProgress> = channelFlow {
+        send(MaterialProcessingProgress.Started)
 
         try {
             // 1. Extract text from file
-            emit(MaterialProcessingProgress.ExtractingText)
+            send(MaterialProcessingProgress.ExtractingText)
 
             val extractedText = fileDataSource.extractText(uri).getOrElse { error ->
-                emit(MaterialProcessingProgress.Failed(error.message ?: "Failed to extract text"))
-                return@flow
+                send(MaterialProcessingProgress.Failed(error.message ?: "Failed to extract text"))
+                return@channelFlow
             }
 
-            emit(MaterialProcessingProgress.TextExtracted(extractedText.length))
+            if (extractedText.isBlank()) {
+                send(MaterialProcessingProgress.Failed("No text found in file"))
+                return@channelFlow
+            }
+
+            send(MaterialProcessingProgress.TextExtracted(extractedText.length))
 
             // 2. Detect material type and save metadata
             val materialType = detectMaterialType(uri)
 
-            // 2. Save material metadata
             val material = Material(
                 id = UUID.randomUUID().toString(),
                 hiveId = hiveId,
                 title = title,
-                type =  materialType,
+                type = materialType,
                 localPath = uri.toString(),
                 processed = false,
                 createdAt = System.currentTimeMillis()
             )
 
             materialRepository.addMaterial(material)
-            emit(MaterialProcessingProgress.MaterialSaved(material.id))
+            send(MaterialProcessingProgress.MaterialSaved(material.id))
 
-            // 3. Extract concepts
-            emit(MaterialProcessingProgress.ExtractingConcepts)
+            // 3. Extract concepts with STREAMING progress
+            send(MaterialProcessingProgress.ExtractingConcepts)
 
-            val concepts = conceptRepository.extractConceptsFromMaterial(
+            var concepts: List<com.dibe.eduhive.domain.model.Concept>? = null
+
+            // Collect streaming progress from repository
+            conceptRepository.extractConceptsFromMaterialStreaming(
                 materialText = extractedText,
                 hiveId = hiveId,
                 hiveContext = hiveContext
-            )
+            ).collect { progress ->
+                when (progress) {
+                    is ConceptExtractionProgress.Processing -> {
+                        // Optional: Send detailed progress (40-60% range)
+                        // send(MaterialProcessingProgress.ExtractingConceptsProgress(progress.percent))
+                    }
+                    is ConceptExtractionProgress.Success -> {
+                        concepts = progress.concepts
+                        send(MaterialProcessingProgress.ConceptsExtracted(progress.concepts.size))
+                    }
+                    is ConceptExtractionProgress.Error -> {
+                        send(MaterialProcessingProgress.Failed("Concept extraction failed: ${progress.message}"))
+                        return@collect
+                    }
+                    else -> { /* Loading - ignore */ }
+                }
+            }
 
-            emit(MaterialProcessingProgress.ConceptsExtracted(concepts.size))
+            val extractedConcepts = concepts ?: run {
+                send(MaterialProcessingProgress.Failed("No concepts extracted"))
+                return@channelFlow
+            }
 
-            // 4. Generate flashcards for each concept
+            if (extractedConcepts.isEmpty()) {
+                send(MaterialProcessingProgress.Failed("No concepts found in material"))
+                return@channelFlow
+            }
+
+            // 4. Generate flashcards for each concept with progress
             var totalFlashcards = 0
 
-            concepts.forEachIndexed { index, concept ->
-                emit(MaterialProcessingProgress.GeneratingFlashcards(index + 1, concepts.size))
+            extractedConcepts.forEachIndexed { index, concept ->
+                send(MaterialProcessingProgress.GeneratingFlashcards(index + 1, extractedConcepts.size))
 
-                val flashcards = flashcardRepository.generateFlashcardsForConcept(
+                // Use standard blocking call (fast enough for flashcards)
+                val flashcards = flashcardRepository.generateFlashcardsForConceptStreaming(
                     conceptId = concept.id,
                     conceptName = concept.name,
                     conceptDescription = concept.description ?: "",
                     count = 5
                 )
 
-                totalFlashcards += flashcards.size
+                flashcards.collect { flashcards ->
+                    if(flashcards is FlashcardGenerationProgress.Success) {
+                        totalFlashcards += flashcards.flashcards.size
+                    }
+                }
+
+                // Small yield to keep UI responsive
+                kotlinx.coroutines.delay(10)
             }
 
             // 5. Mark material as processed
             materialRepository.markAsProcessed(material.id)
 
             // 6. Complete
-            emit(
+            send(
                 MaterialProcessingProgress.Complete(
                     materialId = material.id,
-                    conceptsCreated = concepts.size,
+                    conceptsCreated = extractedConcepts.size,
                     flashcardsCreated = totalFlashcards
                 )
             )
 
         } catch (e: Exception) {
-            emit(MaterialProcessingProgress.Failed(e.message ?: "Unknown error"))
+            send(MaterialProcessingProgress.Failed(e.message ?: "Unknown error"))
         }
     }
 
@@ -115,6 +159,7 @@ class AddMaterialUseCase @Inject constructor(
 
 /**
  * Progress states for material processing.
+ * (Unchanged - matches your ViewModel expectations)
  */
 sealed class MaterialProcessingProgress {
     object Started : MaterialProcessingProgress()
@@ -130,4 +175,5 @@ sealed class MaterialProcessingProgress {
         val flashcardsCreated: Int
     ) : MaterialProcessingProgress()
     data class Failed(val error: String) : MaterialProcessingProgress()
+    data class ExtractingConceptsProgress(val percent: Int) : MaterialProcessingProgress()
 }

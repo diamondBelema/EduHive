@@ -3,11 +3,15 @@ package com.dibe.eduhive.data.repository
 import com.dibe.eduhive.data.local.entity.QuizEntity
 import com.dibe.eduhive.data.local.entity.QuizQuestionEntity
 import com.dibe.eduhive.data.source.ai.AIDataSource
+import com.dibe.eduhive.data.source.ai.GeneratedQuizQuestion
+import com.dibe.eduhive.data.source.ai.QuizGenerationState
 import com.dibe.eduhive.data.source.local.QuizLocalDataSource
 import com.dibe.eduhive.domain.model.Quiz
 import com.dibe.eduhive.domain.model.QuizQuestion
 import com.dibe.eduhive.domain.model.enums.QuizQuestionType
 import com.dibe.eduhive.domain.repository.QuizRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import java.util.UUID
 import jakarta.inject.Inject
 
@@ -18,10 +22,7 @@ class QuizRepositoryImpl @Inject constructor(
 ) : QuizRepository {
 
     override suspend fun createQuiz(quiz: Quiz, questions: List<QuizQuestion>) {
-        // Insert quiz first
         localDataSource.insert(QuizEntity.fromDomain(quiz))
-
-        // Then insert all questions
         val questionEntities = questions.map { QuizQuestionEntity.fromDomain(it) }
         localDataSource.insertQuestions(questionEntities)
     }
@@ -40,10 +41,8 @@ class QuizRepositoryImpl @Inject constructor(
 
     override suspend fun getQuizWithQuestions(quizId: String): Pair<Quiz, List<QuizQuestion>>? {
         val result = localDataSource.getQuizWithQuestions(quizId) ?: return null
-
         val quiz = result.quiz.toDomain()
         val questions = result.questions.map { it.toDomain() }
-
         return Pair(quiz, questions)
     }
 
@@ -52,22 +51,23 @@ class QuizRepositoryImpl @Inject constructor(
     }
 
     /**
-     * NEW: Generate quiz for a concept using AI.
+     * 🚀 STREAMING: Generate quiz with progress tracking.
+     * Note: If AIDataSource doesn't have streaming for quiz yet,
+     * this wraps the standard call in a flow for API consistency.
      */
-    override suspend fun generateQuizForConcept(
+    /**
+     * 🚀 STREAMING: Generate quiz with progress tracking.
+     * Collects from AIDataSource streaming and maps to repository progress states.
+     */
+    fun generateQuizForConceptStreaming(
         conceptId: String,
         conceptName: String,
         conceptDescription: String?,
         questionCount: Int
-    ): Pair<Quiz, List<QuizQuestion>> {
-        // Use AI to generate questions
-        val result = aiDataSource.generateQuiz(
-            conceptName = conceptName,
-            conceptDescription = conceptDescription ?: "",
-            questionCount = questionCount
-        )
+    ): Flow<QuizGenerationProgress> = flow {
+        emit(QuizGenerationProgress.Loading)
 
-        // Create quiz
+        // Create quiz entity first (immediate feedback)
         val quizId = UUID.randomUUID().toString()
         val quiz = Quiz(
             id = quizId,
@@ -76,13 +76,43 @@ class QuizRepositoryImpl @Inject constructor(
             createdAt = System.currentTimeMillis()
         )
 
-        val extractedQuiz = result.getOrElse { error ->
-            // You can log this later if you want
-            return Pair(quiz, emptyList())
+        emit(QuizGenerationProgress.CreatingQuiz(quiz))
+
+        // Collect from streaming data source
+        var generatedQuestions: List<GeneratedQuizQuestion>? = null
+
+        aiDataSource.generateQuizStreaming(
+            conceptName = conceptName,
+            conceptDescription = conceptDescription ?: "",
+            questionCount = questionCount
+        ).collect { state ->
+            when (state) {
+                is QuizGenerationState.Loading -> {
+                    // Already emitted Loading above, can emit CreatingQuiz again if needed
+                    emit(QuizGenerationProgress.CreatingQuiz(quiz))
+                }
+                is QuizGenerationState.Generating -> {
+                    // Forward progress percentage
+                    emit(QuizGenerationProgress.Generating(state.percent))
+                }
+                is QuizGenerationState.Success -> {
+                    generatedQuestions = state.questions
+                }
+                is QuizGenerationState.Error -> {
+                    emit(QuizGenerationProgress.Error(state.message))
+                    return@collect // Stop collecting on error
+                }
+            }
         }
 
-        // Convert generated questions to domain models
-        val questions = extractedQuiz.map { gen ->
+        // Check if we got questions
+        val questions = generatedQuestions ?: run {
+            emit(QuizGenerationProgress.Error("No questions generated"))
+            return@flow
+        }
+
+        // Convert to domain models
+        val domainQuestions = questions.map { gen ->
             QuizQuestion(
                 id = UUID.randomUUID().toString(),
                 quizId = quizId,
@@ -97,9 +127,48 @@ class QuizRepositoryImpl @Inject constructor(
             )
         }
 
-        // Save to database
-        createQuiz(quiz, questions)
+        emit(QuizGenerationProgress.Saving(domainQuestions.size))
 
-        return Pair(quiz, questions)
+        // Save to database
+        createQuiz(quiz, domainQuestions)
+
+        emit(QuizGenerationProgress.Success(quiz, domainQuestions))
     }
+
+    /**
+     * Standard suspend function for backward compatibility.
+     */
+    override suspend fun generateQuizForConcept(
+        conceptId: String,
+        conceptName: String,
+        conceptDescription: String?,
+        questionCount: Int
+    ): Pair<Quiz, List<QuizQuestion>> {
+        var result: Pair<Quiz, List<QuizQuestion>>? = null
+
+        generateQuizForConceptStreaming(
+            conceptId, conceptName, conceptDescription, questionCount
+        ).collect { progress ->
+            when (progress) {
+                is QuizGenerationProgress.Success -> {
+                    result = Pair(progress.quiz, progress.questions)
+                }
+                else -> { /* Ignore intermediate states */ }
+            }
+        }
+
+        return result ?: throw IllegalStateException("Quiz generation failed")
+    }
+}
+
+/**
+ * Progress states for quiz generation UI.
+ */
+sealed class QuizGenerationProgress {
+    object Loading : QuizGenerationProgress()
+    data class CreatingQuiz(val quiz: Quiz) : QuizGenerationProgress()
+    data class Generating(val percent: Int) : QuizGenerationProgress() // NEW: Progress from AI
+    data class Saving(val questionCount: Int) : QuizGenerationProgress()
+    data class Success(val quiz: Quiz, val questions: List<QuizQuestion>) : QuizGenerationProgress()
+    data class Error(val message: String) : QuizGenerationProgress()
 }

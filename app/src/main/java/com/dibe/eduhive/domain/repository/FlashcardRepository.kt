@@ -1,6 +1,8 @@
 package com.dibe.eduhive.domain.repository
 
+import com.dibe.eduhive.data.repository.FlashcardGenerationProgress
 import com.dibe.eduhive.domain.model.Flashcard
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Repository interface for Flashcard operations.
@@ -43,6 +45,13 @@ interface FlashcardRepository {
         conceptDescription: String?,
         count: Int = 5
     ): List<Flashcard>
+
+    fun generateFlashcardsForConceptStreaming(
+        conceptId: String,
+        conceptName: String,
+        conceptDescription: String?,
+        count: Int
+    ): Flow<FlashcardGenerationProgress>
 
     suspend fun deleteFlashcard(flashcardId: String)
 }

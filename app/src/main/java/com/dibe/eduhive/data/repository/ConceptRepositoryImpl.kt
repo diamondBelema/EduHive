@@ -2,17 +2,20 @@ package com.dibe.eduhive.data.repository
 
 import com.dibe.eduhive.data.local.entity.ConceptEntity
 import com.dibe.eduhive.data.source.ai.AIDataSource
+import com.dibe.eduhive.data.source.ai.ConceptExtractionState
 import com.dibe.eduhive.data.source.local.ConceptLocalDataSource
 import com.dibe.eduhive.domain.engine.LearningEngine
 import com.dibe.eduhive.domain.model.Concept
 import com.dibe.eduhive.domain.model.evidence.FlashcardEvidence
 import com.dibe.eduhive.domain.model.evidence.QuizEvidence
 import com.dibe.eduhive.domain.repository.ConceptRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import java.util.UUID
 import jakarta.inject.Inject
 
 
-class ConceptRepositoryImpl @Inject constructor (
+class ConceptRepositoryImpl @Inject constructor(
     private val localDataSource: ConceptLocalDataSource,
     private val aiDataSource: AIDataSource,
     private val learningEngine: LearningEngine
@@ -43,17 +46,14 @@ class ConceptRepositoryImpl @Inject constructor (
         conceptId: String,
         evidence: FlashcardEvidence
     ) {
-        // Get current concept
         val entity = localDataSource.getById(conceptId) ?: return
         val concept = entity.toDomain()
 
-        // Apply Bayesian update via LearningEngine
         val updatedConcept = learningEngine.applyFlashcardEvidence(
             concept = concept,
             evidence = evidence
         )
 
-        // Save back to database
         localDataSource.updateConfidence(
             id = updatedConcept.id,
             score = updatedConcept.confidence.toFloat(),
@@ -65,17 +65,14 @@ class ConceptRepositoryImpl @Inject constructor (
         conceptId: String,
         evidence: QuizEvidence
     ) {
-        // Get current concept
         val entity = localDataSource.getById(conceptId) ?: return
         val concept = entity.toDomain()
 
-        // Apply Bayesian update via LearningEngine
         val updatedConcept = learningEngine.applyQuizEvidence(
             concept = concept,
             evidence = evidence
         )
 
-        // Save back to database
         localDataSource.updateConfidence(
             id = updatedConcept.id,
             score = updatedConcept.confidence.toFloat(),
@@ -88,21 +85,88 @@ class ConceptRepositoryImpl @Inject constructor (
     }
 
     /**
-     * NEW: Extract concepts from material text using AI.
+     * 🚀 STREAMING: Extract concepts with real-time progress updates.
+     * Use this for UI progress bars.
+     */
+    override fun extractConceptsFromMaterialStreaming(
+        materialText: String,
+        hiveId: String,
+        hiveContext: String
+    ): Flow<ConceptExtractionProgress> = flow {
+        emit(ConceptExtractionProgress.Loading)
+
+        aiDataSource.extractConceptsStreaming(
+            text = materialText,
+            hiveContext = hiveContext
+        ).collect { state ->
+            when (state) {
+                is ConceptExtractionState.Loading -> {
+                    emit(ConceptExtractionProgress.Loading)
+                }
+                is ConceptExtractionState.Progress -> {
+                    emit(ConceptExtractionProgress.Processing(state.percent))
+                }
+                is ConceptExtractionState.Success -> {
+                    val domainConcepts = state.concepts.map { aiConcept ->
+                        Concept(
+                            id = UUID.randomUUID().toString(),
+                            hiveId = hiveId,
+                            name = aiConcept.name,
+                            description = aiConcept.description,
+                            confidence = 0.3,
+                            lastReviewedAt = null
+                        )
+                    }
+
+                    // Save to database
+                    addConcepts(domainConcepts)
+
+                    emit(ConceptExtractionProgress.Success(domainConcepts))
+                }
+                is ConceptExtractionState.Error -> {
+                    emit(ConceptExtractionProgress.Error(state.message))
+                }
+            }
+        }
+    }
+
+    /**
+     * 📄 BATCH PROCESSING: Extract concepts from multi-page documents (PDFs).
+     * Optimized for large documents - processes pages in parallel.
      */
     override suspend fun extractConceptsFromMaterial(
         materialText: String,
         hiveId: String,
         hiveContext: String,
     ): List<Concept> {
+        // Check if this is a large document that needs batching
+        val pages = if (materialText.length > 15000) {
+            // Split into logical pages/sections (~5000 chars each)
+            materialText.chunked(5000)
+        } else {
+            listOf(materialText)
+        }
 
-        val result = aiDataSource.extractConcepts(
-            text = materialText,
-            hiveContext = hiveContext
-        )
+        return if (pages.size > 1) {
+            // Use batch processing for multi-page content
+            extractConceptsFromDocumentPages(pages, hiveId, hiveContext)
+        } else {
+            // Use legacy single-call for small content
+            extractConceptsSingle(materialText, hiveId, hiveContext)
+        }
+    }
 
-        val extractedConcepts = result.getOrElse { error ->
-            // You can log this later if you want
+    /**
+     * Single-page extraction (fallback for small content).
+     */
+    private suspend fun extractConceptsSingle(
+        text: String,
+        hiveId: String,
+        hiveContext: String
+    ): List<Concept> {
+        val result = aiDataSource.extractConcepts(text, hiveContext)
+
+        val extractedConcepts = result.getOrElse {
             return emptyList()
         }
 
@@ -118,8 +182,48 @@ class ConceptRepositoryImpl @Inject constructor (
         }
 
         addConcepts(domainConcepts)
-
         return domainConcepts
     }
 
+    /**
+     * Multi-page batch processing with deduplication.
+     */
+    private suspend fun extractConceptsFromDocumentPages(
+        pages: List<String>,
+        hiveId: String,
+        hiveContext: String
+    ): List<Concept> {
+        val result = aiDataSource.extractConceptsFromDocument(
+            pages = pages,
+            hiveContext = hiveContext
+        )
+
+        val concepts = result.getOrElse {
+            return emptyList()
+        }
+
+        val domainConcepts = concepts.map { aiConcept ->
+            Concept(
+                id = UUID.randomUUID().toString(),
+                hiveId = hiveId,
+                name = aiConcept.name,
+                description = aiConcept.description,
+                confidence = 0.3,
+                lastReviewedAt = null
+            )
+        }
+
+        addConcepts(domainConcepts)
+        return domainConcepts
+    }
+}
+
+/**
+ * Progress states for concept extraction UI.
+ */
+sealed class ConceptExtractionProgress {
+    object Loading : ConceptExtractionProgress()
+    data class Processing(val percent: Int) : ConceptExtractionProgress()
+    data class Success(val concepts: List<Concept>) : ConceptExtractionProgress()
+    data class Error(val message: String) : ConceptExtractionProgress()
 }
