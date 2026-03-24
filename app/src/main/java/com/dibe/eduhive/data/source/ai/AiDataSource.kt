@@ -1,6 +1,8 @@
 package com.dibe.eduhive.data.source.ai
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
@@ -40,17 +42,19 @@ class AIDataSource @Inject constructor(
 
         pages.forEachIndexed { index, page ->
             send(ConceptExtractionState.Progress(((index.toFloat() / totalPages) * 100).toInt()))
-            
+
             val prompt = buildConceptExtractionPrompt(page, hiveContext)
-            
-            // Process individual page
             val result = modelManager.generate(prompt)
-            
+
             result.onSuccess { response ->
                 val pageConcepts = parseConceptsFast(response)
                 allExtractedConcepts.addAll(pageConcepts)
-            }.onFailure { e ->
-                // We continue to next page even if one fails
+            }.onFailure {
+                // 🔴 OLD: silently continues with dead session
+                // ✅ NEW: reinitialize before next page
+                modelManager.unloadModel()
+                delay(300)
+                ensureModelLoaded()
             }
         }
 
@@ -104,7 +108,16 @@ class AIDataSource @Inject constructor(
                 operation = { page -> buildConceptExtractionPrompt(page, hiveContext) }
             )
 
-            val allConcepts = pageResults.flatMap { parseConceptsFast(it) }
+
+            val allConcepts = pageResults.flatMap {
+                Log.d("AIDebug", "Raw response: $it") // ADD THIS
+
+                val pageConcepts = parseConceptsFast(it)
+
+                Log.d("AIDebug", "Parsed concepts: ${pageConcepts.size}") // AND THIS
+
+                pageConcepts
+            }
             Result.success(deduplicateConcepts(allConcepts))
         } catch (e: Exception) {
             Result.failure(e)
@@ -130,6 +143,8 @@ class AIDataSource @Inject constructor(
         val result = modelManager.generate(prompt)
 
         result.onSuccess { response ->
+            Log.d("AIDebug", "Raw response: $response") // ADD THIS
+
             send(FlashcardGenerationState.Success(parseFlashcardsFast(response)))
         }.onFailure { e ->
             send(FlashcardGenerationState.Error(e.message ?: "Failed to generate flashcards"))
@@ -222,20 +237,28 @@ class AIDataSource @Inject constructor(
     }
 
     private fun buildConceptExtractionPrompt(text: String, context: String): String {
+        val templateOverhead = 150 // chars used by the template itself
+        val maxTextChars = AIModelManager.MAX_INPUT_CHARS - templateOverhead
+
+        // Truncate at word boundary before injecting into prompt
+        val safeText = if (text.length > maxTextChars) {
+            text.take(maxTextChars).substringBeforeLast(' ')
+        } else text
+
         return """
-            Extract 3-10 key concepts from this educational material.
-            ${if (context.isNotEmpty()) "Context: $context\n" else ""}
-            Material:
-            $text
-            
-            For each concept, provide:
-            1. Name (2-5 words)
-            2. Description (1-2 sentences)
-            
-            Format EXACTLY like this:
-            CONCEPT: [Name]
-            DESCRIPTION: [Description]
-        """.trimIndent()
+        Extract 3-10 key concepts from this educational material.
+        ${if (context.isNotEmpty()) "Context: $context\n" else ""}
+        Material:
+        $safeText
+        
+        For each concept, provide:
+        1. Name (2-5 words)
+        2. Description (1-2 sentences)
+        
+        Format EXACTLY like this:
+        CONCEPT: [Name]
+        DESCRIPTION: [Description]
+    """.trimIndent()
     }
 
     private fun buildFlashcardPrompt(name: String, description: String, count: Int): String {
@@ -294,6 +317,7 @@ class AIDataSource @Inject constructor(
                 currentName = null
             }
         }
+
         return concepts
     }
 

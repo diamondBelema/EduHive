@@ -41,10 +41,8 @@ class AIModelManager @Inject constructor(
         private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q4_0-web.task?download=true"
 
         // 🛡️ SAFETY LIMITS
-        private const val MAX_CONTEXT_TOKENS = 2048
-        // Safe input limit to prevent SIGSEGV in the native engine.
-        // 2048 tokens is ~8000 chars. We use 6000 to leave room for the response.
-        const val MAX_INPUT_CHARS = 6000 
+        private const val MAX_CONTEXT_TOKENS = 1280 // match the ekv value in your model filenames
+        const val MAX_INPUT_CHARS = 4000 // reduce accordingly (1280 tokens ≈ ~5000 chars, leave room for response)
     }
 
     private var llmInference: LlmInference? = null
@@ -157,30 +155,26 @@ class AIModelManager @Inject constructor(
 
     suspend fun generate(prompt: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val inference = llmInference ?: return@withContext Result.failure(Exception("Model not loaded"))
+            val inference = llmInference
+                ?: return@withContext Result.failure(Exception("Model not loaded"))
 
-            if (prompt.length <= MAX_INPUT_CHARS) {
-                val response = inferenceMutex.withLock {
-                    inference.generateResponse(prompt)
-                }
-                return@withContext Result.success(response)
+            // Truncate at word boundary — never split into chunks
+            val safePrompt = if (prompt.length > MAX_INPUT_CHARS) {
+                prompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
+            } else prompt
+
+            val response = inferenceMutex.withLock {
+                inference.generateResponse(safePrompt)
             }
+            Result.success(response)
 
-            val chunks = prompt.chunked(MAX_INPUT_CHARS)
-            val combinedResults = StringBuilder()
-
-            chunks.forEach { chunk ->
-                val response = inferenceMutex.withLock {
-                    inference.generateResponse(chunk)
-                }
-                combinedResults.append(response).append("\n\n")
-                delay(50) 
-            }
-
-            Result.success(combinedResults.toString().trim())
         } catch (e: Exception) {
-            Log.e(TAG, "Generation failed", e)
-            if (e.message?.contains("OUT_OF_RANGE") == true) unloadModel()
+            Log.e(TAG, "Generation failed, reinitializing session", e)
+            // Always reinitialize after ANY failure
+            unloadModel()
+            delay(500)
+            val activeModel = modelPreferences.getActiveModel()
+            if (activeModel != null) loadModel(activeModel)
             Result.failure(e)
         }
     }

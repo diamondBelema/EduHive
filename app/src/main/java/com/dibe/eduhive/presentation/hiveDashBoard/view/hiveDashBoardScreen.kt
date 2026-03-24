@@ -1,19 +1,32 @@
 package com.dibe.eduhive.presentation.screens
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Concept
 import com.dibe.eduhive.presentation.hiveDashBoard.viewmodel.HiveDashboardViewModel
@@ -27,16 +40,30 @@ fun HiveDashboardScreen(
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text("Dashboard") },
+            MediumTopAppBar(
+                title = { 
+                    Text(
+                        "Knowledge Hive", 
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    ) 
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                actions = {
+                    IconButton(onClick = { /* Settings or Info */ }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More")
+                    }
+                },
+                scrollBehavior = scrollBehavior
             )
         }
     ) { padding ->
@@ -46,91 +73,94 @@ fun HiveDashboardScreen(
                 .padding(padding)
         ) {
             when {
-                state.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                state.isLoading && state.overview == null -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(strokeWidth = 3.dp)
+                    }
                 }
 
                 state.overview != null -> {
+                    val overview = state.overview!!
+                    
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        contentPadding = PaddingValues(bottom = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        // Overall Progress
+                        // Header Stats Section
                         item {
-                            ProgressCard(
-                                progress = state.overview!!.averageConfidence.toFloat()
+                            DashboardHeader(
+                                confidence = overview.averageConfidence.toFloat(),
+                                dueCount = overview.dueFlashcardsCount
                             )
                         }
 
-                        // Quick Actions
+                        // Expressive Quick Actions
                         item {
-                            Text(
-                                text = "Quick Actions",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        item {
+                            SectionHeader(title = "Learning Tools", icon = Icons.Outlined.AutoAwesome)
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                QuickActionCard(
-                                    icon = "🎴",
-                                    title = "Study",
-                                    subtitle = "${state.overview!!.dueFlashcardsCount} due",
+                                ActionCardExpressive(
+                                    title = "Study Now",
+                                    subtitle = "${overview.dueFlashcardsCount} cards due",
+                                    icon = Icons.Rounded.PlayArrow,
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                     onClick = onNavigateToStudy,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1.1f)
                                 )
-                                QuickActionCard(
-                                    icon = "📄",
-                                    title = "Add Material",
-                                    subtitle = "Upload docs",
+                                ActionCardExpressive(
+                                    title = "Import",
+                                    subtitle = "PDF, Image",
+                                    icon = Icons.Rounded.Add,
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                                     onClick = onNavigateToAddMaterial,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(0.9f)
                                 )
                             }
                         }
 
-                        // Weak Concepts
-                        if (state.overview!!.weakConcepts.isNotEmpty()) {
+                        // Weak Concepts with "Needs Focus" styling
+                        if (overview.weakConcepts.isNotEmpty()) {
                             item {
-                                Text(
-                                    text = "Weak Concepts",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                SectionHeader(title = "Focus Areas", icon = Icons.Default.Warning, color = MaterialTheme.colorScheme.error)
                             }
-
-                            items(state.overview!!.weakConcepts.take(5)) { concept ->
-                                WeakConceptCard(concept = concept)
+                            items(overview.weakConcepts.take(3)) { concept ->
+                                ConceptFocusCard(concept = concept)
                             }
                         }
 
-                        // Stats
+                        // Statistics Card
                         item {
-                            StatsCard(
-                                totalConcepts = state.overview!!.totalConcepts,
-                                totalMaterials = state.overview!!.totalMaterials,
-                                recentReviews = state.overview!!.recentReviewsCount
+                            SectionHeader(title = "Analytics", icon = Icons.Default.BarChart)
+                            MetricsGrid(
+                                totalConcepts = overview.totalConcepts,
+                                totalMaterials = overview.totalMaterials,
+                                recentReviews = overview.recentReviewsCount
                             )
                         }
                     }
                 }
             }
 
-            // Error snackbar
-            state.error?.let { error ->
-                Snackbar(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(16.dp)
-                ) {
-                    Text(error)
+            // Error Message
+            AnimatedVisibility(
+                visible = state.error != null,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                state.error?.let { error ->
+                    Snackbar(
+                        modifier = Modifier.padding(16.dp),
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ) { Text(error) }
                 }
             }
         }
@@ -138,157 +168,237 @@ fun HiveDashboardScreen(
 }
 
 @Composable
-fun ProgressCard(progress: Float) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
+fun DashboardHeader(confidence: Float, dueCount: Int) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Overall Progress",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    Text(
+                        "Mastery Level",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "${(confidence * 100).toInt()}%",
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+                
+                // Visual Progress Circle
+                Box(contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        progress = 1f,
+                        modifier = Modifier.size(80.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        strokeWidth = 8.dp
+                    )
+                    CircularProgressIndicator(
+                        progress = confidence,
+                        modifier = Modifier.size(80.dp),
+                        strokeWidth = 8.dp,
+                        strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                    Icon(
+                        Icons.Outlined.School,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Modern progress indicator
             LinearProgressIndicator(
-                progress = progress,
+                progress = confidence,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(12.dp)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "${(progress * 100).toInt()}%",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold
+                    .height(8.dp)
+                    .clip(CircleShape),
+                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
             )
         }
     }
 }
 
 @Composable
-fun QuickActionCard(
-    icon: String,
+fun SectionHeader(title: String, icon: ImageVector, color: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 20.dp)
+            .padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = color)
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = color
+        )
+    }
+}
+
+@Composable
+fun ActionCardExpressive(
     title: String,
     subtitle: String,
+    icon: ImageVector,
+    containerColor: Color,
+    contentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier
-            .height(120.dp)
-            .clickable(onClick = onClick)
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(140.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = containerColor,
+        contentColor = contentColor
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(20.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = icon,
-                style = MaterialTheme.typography.displayMedium
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Surface(
+                color = contentColor.copy(alpha = 0.15f),
+                shape = CircleShape,
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(24.dp))
+                }
+            }
+            
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 24.sp
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = contentColor.copy(alpha = 0.7f)
+                )
+            }
         }
     }
 }
 
 @Composable
-fun WeakConceptCard(concept: Concept) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
+fun ConceptFocusCard(concept: Concept) {
+    ElevatedCard(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+                .padding(16.dp)
+                .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "⚠️",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(end = 12.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable { /* Re-generate or explain */ },
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    progress = concept.confidence.toFloat(),
+                    modifier = Modifier.fillMaxSize(),
+                    color = if (concept.confidence < 0.4) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    strokeWidth = 4.dp
+                )
+                Text(
+                    "${(concept.confidence * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = concept.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                concept.description?.let { desc ->
-                    Text(
-                        text = desc,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
-                }
+                Text(
+                    text = concept.description ?: "Requires review",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Text(
-                text = "${(concept.confidence * 100).toInt()}%",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.error
-            )
+            
+            IconButton(onClick = { /* Jump to concept study */ }) {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline
+                )
+            }
         }
     }
 }
 
 @Composable
-fun StatsCard(
+fun MetricsGrid(
     totalConcepts: Int,
     totalMaterials: Int,
     recentReviews: Int
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Statistics",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            StatRow("📚 Concepts", totalConcepts.toString())
-            StatRow("📄 Materials", totalMaterials.toString())
-            StatRow("✅ Recent Reviews", recentReviews.toString())
-        }
+        MetricSmallCard("Concepts", totalConcepts.toString(), Icons.Default.Book, Modifier.weight(1f))
+        MetricSmallCard("Docs", totalMaterials.toString(), Icons.Default.Description, Modifier.weight(1f))
+        MetricSmallCard("Reviews", recentReviews.toString(), Icons.Outlined.History, Modifier.weight(1f))
     }
 }
 
 @Composable
-fun StatRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+fun MetricSmallCard(label: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
+    OutlinedCard(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.large
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold
-        )
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

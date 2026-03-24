@@ -1,19 +1,28 @@
 package com.dibe.eduhive.presentation.flashcardStudy.view
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.enums.ConfidenceLevel
 import com.dibe.eduhive.presentation.flashcardStudy.viewmodel.FlashcardStudyEvent
@@ -29,16 +38,28 @@ fun FlashcardStudyScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
-                    Text(
-                        "${state.currentIndex + 1} / ${state.flashcards.size}",
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = CircleShape
+                    ) {
+                        Text(
+                            "${state.currentIndex + 1} of ${state.flashcards.size}",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { /* Help/Tips */ }) {
+                        Icon(Icons.Outlined.Lightbulb, contentDescription = "Tips")
                     }
                 }
             )
@@ -51,24 +72,20 @@ fun FlashcardStudyScreen(
         ) {
             when {
                 state.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(strokeWidth = 3.dp)
+                    }
                 }
 
                 state.isComplete -> {
-                    CompletionScreen(
+                    StudyCompletionScreenExpressive(
                         count = state.completedCount,
-                        onContinue = onNavigateBack,
-                        modifier = Modifier.align(Alignment.Center)
+                        onContinue = onNavigateBack
                     )
                 }
 
                 state.flashcards.isEmpty() -> {
-                    NoFlashcardsState(
-                        onNavigateBack = onNavigateBack,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    NoFlashcardsStateExpressive(onNavigateBack = onNavigateBack)
                 }
 
                 else -> {
@@ -76,48 +93,53 @@ fun FlashcardStudyScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // Progress bar
+                            // Expressive Progress Bar
                             LinearProgressIndicator(
                                 progress = state.progress,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(10.dp)
+                                    .clip(CircleShape),
+                                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
                             )
 
-                            Spacer(modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.weight(0.5f))
 
-                            // Flashcard
-                            FlipCard(
+                            // Flashcard with enhanced Flip
+                            FlipCardExpressive(
                                 front = flashcard.front,
                                 back = flashcard.back,
                                 isFlipped = state.isFlipped,
                                 onFlip = { viewModel.onEvent(FlashcardStudyEvent.FlipCard) }
                             )
 
-                            Spacer(modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.weight(0.5f))
 
-                            // Rating buttons (only show when flipped)
-                            if (state.isFlipped) {
-                                RatingButtons(
+                            // Rating buttons with Animated Visibility
+                            AnimatedVisibility(
+                                visible = state.isFlipped,
+                                enter = slideInVertically { it / 2 } + fadeIn(),
+                                exit = slideOutVertically { it / 2 } + fadeOut()
+                            ) {
+                                RatingSectionExpressive(
                                     onRate = { level ->
                                         viewModel.onEvent(FlashcardStudyEvent.RateConfidence(level))
                                     }
                                 )
                             }
+                            
+                            if (!state.isFlipped) {
+                                Text(
+                                    "Tap card to reveal answer",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                            }
                         }
                     }
-                }
-            }
-
-            // Error snackbar
-            state.error?.let { error ->
-                Snackbar(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(16.dp)
-                ) {
-                    Text(error)
                 }
             }
         }
@@ -125,7 +147,7 @@ fun FlashcardStudyScreen(
 }
 
 @Composable
-fun FlipCard(
+fun FlipCardExpressive(
     front: String,
     back: String,
     isFlipped: Boolean,
@@ -133,19 +155,26 @@ fun FlipCard(
 ) {
     val rotation by animateFloatAsState(
         targetValue = if (isFlipped) 180f else 0f,
-        animationSpec = tween(durationMillis = 400)
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessLow
+        )
     )
 
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
-            .height(300.dp)
+            .aspectRatio(0.8f) // Vertical card feel
             .graphicsLayer {
                 rotationY = rotation
-                cameraDistance = 12f * density
+                cameraDistance = 16f * density
             }
             .clickable(onClick = onFlip),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        shape = MaterialTheme.shapes.extraLarge,
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 8.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (rotation <= 90f) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer
+        )
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -154,33 +183,46 @@ fun FlipCard(
             if (rotation <= 90f) {
                 // Front side
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Icon(
+                        Icons.Default.Info, 
+                        contentDescription = null, 
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         text = front,
-                        style = MaterialTheme.typography.headlineSmall,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Tap to flip",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.headlineMedium,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 36.sp
                     )
                 }
             } else {
-                // Back side (mirrored)
+                // Back side
                 Column(
                     modifier = Modifier
-                        .padding(24.dp)
+                        .padding(32.dp)
                         .graphicsLayer { rotationY = 180f },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Icon(
+                        Icons.Default.CheckCircle, 
+                        contentDescription = null, 
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         text = back,
                         style = MaterialTheme.typography.headlineSmall,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 32.sp
                     )
                 }
             }
@@ -189,133 +231,147 @@ fun FlipCard(
 }
 
 @Composable
-fun RatingButtons(
+fun RatingSectionExpressive(
     onRate: (ConfidenceLevel) -> Unit
 ) {
-    Column(
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text(
-            text = "How well did you know this?",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            RatingButton(
-                emoji = "😰",
-                label = "Unknown",
-                onClick = { onRate(ConfidenceLevel.UNKNOWN) }
+            Text(
+                text = "How well did you know this?",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
             )
-            RatingButton(
-                emoji = "😕",
-                label = "Little",
-                onClick = { onRate(ConfidenceLevel.KNOWN_LITTLE) }
-            )
-            RatingButton(
-                emoji = "😐",
-                label = "Fair",
-                onClick = { onRate(ConfidenceLevel.KNOWN_FAIRLY) }
-            )
-            RatingButton(
-                emoji = "😊",
-                label = "Well",
-                onClick = { onRate(ConfidenceLevel.KNOWN_WELL) }
-            )
-            RatingButton(
-                emoji = "🎉",
-                label = "Master",
-                onClick = { onRate(ConfidenceLevel.MASTERED) }
-            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                ExpressiveRatingButton("😰", "Poor", MaterialTheme.colorScheme.errorContainer) { onRate(ConfidenceLevel.UNKNOWN) }
+                ExpressiveRatingButton("😐", "Okay", MaterialTheme.colorScheme.secondaryContainer) { onRate(ConfidenceLevel.KNOWN_FAIRLY) }
+                ExpressiveRatingButton("🎉", "Easy", MaterialTheme.colorScheme.primaryContainer) { onRate(ConfidenceLevel.MASTERED) }
+            }
         }
     }
 }
 
 @Composable
-fun RatingButton(
+fun ExpressiveRatingButton(
     emoji: String,
     label: String,
+    containerColor: Color,
     onClick: () -> Unit
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.large)
+            .clickable(onClick = onClick)
+            .padding(8.dp)
     ) {
-        Text(
-            text = emoji,
-            style = MaterialTheme.typography.displaySmall
-        )
+        Surface(
+            modifier = Modifier.size(64.dp),
+            shape = CircleShape,
+            color = containerColor
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(text = emoji, fontSize = 32.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.bodySmall
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold
         )
     }
 }
 
 @Composable
-fun NoFlashcardsState(
-    onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+fun StudyCompletionScreenExpressive(
+    count: Int,
+    onContinue: () -> Unit
 ) {
     Column(
-        modifier = modifier.padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
+        Box(contentAlignment = Alignment.Center) {
+            Surface(
+                modifier = Modifier.size(160.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            ) {}
+            Text(text = "🎊", style = MaterialTheme.typography.displayLarge)
+        }
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
         Text(
-            text = "🎉",
-            style = MaterialTheme.typography.displayLarge
+            text = "Session Complete!",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.ExtraBold
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
         Text(
-            text = "All caught up!",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
+            text = "You reviewed $count concepts today. Your knowledge is growing!",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "No flashcards due right now",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onNavigateBack) {
-            Text("Back to Dashboard")
+        
+        Spacer(modifier = Modifier.height(48.dp))
+        
+        Button(
+            onClick = onContinue,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = MaterialTheme.shapes.large
+        ) {
+            Text("Back to Dashboard", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
 
 @Composable
-fun CompletionScreen(
-    count: Int,
-    onContinue: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun NoFlashcardsStateExpressive(onNavigateBack: () -> Unit) {
     Column(
-        modifier = modifier.padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
+        Text(text = "🛌", style = MaterialTheme.typography.displayLarge)
+        Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "✅",
-            style = MaterialTheme.typography.displayLarge
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Session Complete!",
-            style = MaterialTheme.typography.titleLarge,
+            text = "Hive is Resting",
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
-        Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Reviewed $count flashcards",
-            style = MaterialTheme.typography.bodyMedium,
+            text = "No cards are due for review right now.",
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onContinue) {
-            Text("Continue")
+        Spacer(modifier = Modifier.height(40.dp))
+        OutlinedButton(
+            onClick = onNavigateBack,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = MaterialTheme.shapes.large
+        ) {
+            Text("Return Home")
         }
     }
 }

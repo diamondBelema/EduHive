@@ -9,6 +9,7 @@ import com.dibe.eduhive.domain.model.MaterialType
 import com.dibe.eduhive.domain.repository.ConceptRepository
 import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.delay
@@ -32,6 +33,7 @@ class AddMaterialUseCase @Inject constructor(
     private val flashcardRepository: FlashcardRepository
 ) {
 
+    @OptIn(DelicateCoroutinesApi::class)
     operator fun invoke(
         uri: Uri,
         hiveId: String,
