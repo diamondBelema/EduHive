@@ -12,7 +12,7 @@ import com.dibe.eduhive.domain.repository.ConceptRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.util.UUID
-import jakarta.inject.Inject
+import javax.inject.Inject
 
 
 class ConceptRepositoryImpl @Inject constructor(
@@ -84,19 +84,21 @@ class ConceptRepositoryImpl @Inject constructor(
         localDataSource.deleteAllForHive(conceptId)
     }
 
-    /**
-     * 🚀 STREAMING: Extract concepts with real-time progress updates.
-     * Use this for UI progress bars.
-     */
     override fun extractConceptsFromMaterialStreaming(
         materialText: String,
+        hiveId: String,
+        hiveContext: String
+    ): Flow<ConceptExtractionProgress> = extractConceptsFromPagesStreaming(listOf(materialText), hiveId, hiveContext)
+
+    override fun extractConceptsFromPagesStreaming(
+        pages: List<String>,
         hiveId: String,
         hiveContext: String
     ): Flow<ConceptExtractionProgress> = flow {
         emit(ConceptExtractionProgress.Loading)
 
-        aiDataSource.extractConceptsStreaming(
-            text = materialText,
+        aiDataSource.extractConceptsFromPagesStreaming(
+            pages = pages,
             hiveContext = hiveContext
         ).collect { state ->
             when (state) {
@@ -130,35 +132,15 @@ class ConceptRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * 📄 BATCH PROCESSING: Extract concepts from multi-page documents (PDFs).
-     * Optimized for large documents - processes pages in parallel.
-     */
     override suspend fun extractConceptsFromMaterial(
         materialText: String,
         hiveId: String,
         hiveContext: String,
     ): List<Concept> {
-        // Check if this is a large document that needs batching
-        val pages = if (materialText.length > 15000) {
-            // Split into logical pages/sections (~5000 chars each)
-            materialText.chunked(5000)
-        } else {
-            listOf(materialText)
-        }
-
-        return if (pages.size > 1) {
-            // Use batch processing for multi-page content
-            extractConceptsFromDocumentPages(pages, hiveId, hiveContext)
-        } else {
-            // Use legacy single-call for small content
-            extractConceptsSingle(materialText, hiveId, hiveContext)
-        }
+        val pages = materialText.chunked(4000)
+        return extractConceptsFromDocumentPages(pages, hiveId, hiveContext)
     }
 
-    /**
-     * Single-page extraction (fallback for small content).
-     */
     private suspend fun extractConceptsSingle(
         text: String,
         hiveId: String,
@@ -185,9 +167,6 @@ class ConceptRepositoryImpl @Inject constructor(
         return domainConcepts
     }
 
-    /**
-     * Multi-page batch processing with deduplication.
-     */
     private suspend fun extractConceptsFromDocumentPages(
         pages: List<String>,
         hiveId: String,

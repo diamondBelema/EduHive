@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * Repository interface for Concept operations.
- * This is where the Learning Engine integrates with data persistence.
  */
 interface ConceptRepository {
 
@@ -18,18 +17,13 @@ interface ConceptRepository {
 
     suspend fun getConceptById(conceptId: String): Concept?
 
-    /**
-     * Get weakest concepts (lowest confidence) for a hive.
-     * Used for dashboards and prioritization.
-     */
     suspend fun getWeakestConcepts(hiveId: String, limit: Int = 5): List<Concept>
 
-    /**
-     * Get average confidence across all concepts in a hive.
-     * Used for overall progressPercentage tracking.
-     */
     suspend fun getAverageConfidence(hiveId: String): Double?
 
+    /**
+     * Extract concepts from material text with streaming progress.
+     */
     fun extractConceptsFromMaterialStreaming(
         materialText: String,
         hiveId: String,
@@ -37,18 +31,20 @@ interface ConceptRepository {
     ): Flow<ConceptExtractionProgress>
 
     /**
-     * Update concept confidence based on flashcard evidence.
-     * Internally uses LearningEngine.
+     * Extract concepts from a document split into pages.
+     * Preferred for PDFs and large documents to maintain context safety.
      */
+    fun extractConceptsFromPagesStreaming(
+        pages: List<String>,
+        hiveId: String,
+        hiveContext: String
+    ): Flow<ConceptExtractionProgress>
+
     suspend fun updateWithFlashcardEvidence(
         conceptId: String,
         evidence: FlashcardEvidence
     )
 
-    /**
-     * Update concept confidence based on quiz evidence.
-     * Internally uses LearningEngine.
-     */
     suspend fun updateWithQuizEvidence(
         conceptId: String,
         evidence: QuizEvidence

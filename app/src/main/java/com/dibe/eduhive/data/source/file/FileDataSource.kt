@@ -20,56 +20,51 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Simple, bulletproof file data source.
- *
- * Supported formats:
- * - PDF (text-based)
- * - PDF (scanned with OCR)
- * - Images (JPG, PNG via OCR)
- * - HTML (web pages)
- * - Plain text (.txt, .md)
- *
- * All using battle-tested, stable libraries.
+ * Enhanced file data source with page-aware extraction.
  */
 class FileDataSource @Inject constructor(
     val context: Context
 ) {
 
     init {
-        // Initialize PDFBox (required for Android)
         PDFBoxResourceLoader.init(context)
     }
 
     /**
-     * Extract text from any supported file format.
+     * Extract text from any supported file format as a single string.
      */
     suspend fun extractText(uri: Uri): Result<String> {
+        return extractTextPages(uri).map { it.joinToString("\n\n") }
+    }
+
+    /**
+     * Extract text from any supported file format as a list of pages.
+     * This is crucial for processing large PDFs without exceeding AI context limits.
+     */
+    suspend fun extractTextPages(uri: Uri): Result<List<String>> {
         return try {
             val mimeType = context.contentResolver.getType(uri) ?: ""
 
-            val text = when {
+            val pages = when {
                 mimeType.contains("pdf") ->
-                    extractTextFromPdf(uri)
+                    extractPagesFromPdf(uri)
 
                 mimeType.contains("image") ->
-                    extractTextFromImage(uri)
+                    listOf(extractTextFromImage(uri))
 
                 mimeType.contains("html") ->
-                    extractTextFromHtml(uri)
+                    listOf(extractTextFromHtml(uri))
 
                 mimeType.contains("text") ->
-                    extractTextFromPlainText(uri)
+                    chunkPlainText(extractTextFromPlainText(uri))
 
-                else -> throw UnsupportedFileTypeException(
-                    "Unsupported file type: $mimeType. " +
-                            "Supported: PDF, Images, HTML, Text"
-                )
+                else -> throw UnsupportedFileTypeException("Unsupported file type: $mimeType")
             }
 
-            if (text.isBlank()) {
+            if (pages.all { it.isBlank() }) {
                 Result.failure(EmptyFileException("File contains no readable text"))
             } else {
-                Result.success(text)
+                Result.success(pages.filter { it.isNotBlank() })
             }
 
         } catch (e: Exception) {
@@ -77,161 +72,76 @@ class FileDataSource @Inject constructor(
         }
     }
 
-    /**
-     * Extract text from PDF.
-     * Tries text extraction first, falls back to OCR if needed.
-     */
-    private suspend fun extractTextFromPdf(uri: Uri): String = withContext(Dispatchers.IO) {
+    private suspend fun extractPagesFromPdf(uri: Uri): List<String> = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             val document = PDDocument.load(inputStream)
+            val pages = mutableListOf<String>()
 
             try {
-                // Try text extraction first
                 val stripper = PDFTextStripper()
-                val text = stripper.getText(document)
+                val totalPages = document.numberOfPages
 
-                // If very little text, it's probably scanned - use OCR
-                if (text.trim().length < 50 && document.numberOfPages > 0) {
-                    document.close()
-                    return@withContext extractTextFromScannedPdf(uri)
+                for (i in 1..totalPages) {
+                    stripper.startPage = i
+                    stripper.endPage = i
+                    val pageText = stripper.getText(document).trim()
+                    
+                    if (pageText.length < 50) {
+                        // Fallback to OCR for this specific page if it seems like an image
+                        val renderer = PDFRenderer(document)
+                        val bitmap = renderer.renderImageWithDPI(i - 1, 300f)
+                        val ocrText = extractTextFromBitmap(bitmap)
+                        bitmap.recycle()
+                        pages.add(ocrText)
+                    } else {
+                        pages.add(pageText)
+                    }
                 }
-
-                text
+                pages
             } finally {
                 document.close()
             }
         } ?: throw FileReadException("Failed to open PDF file")
     }
 
-    /**
-     * Extract text from scanned PDF using OCR.
-     * Renders each page as image and runs OCR.
-     */
-    private suspend fun extractTextFromScannedPdf(uri: Uri): String = withContext(Dispatchers.IO) {
-        context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            val document = PDDocument.load(inputStream)
-            val textBuilder = StringBuilder()
-
-            try {
-                val renderer = PDFRenderer(document)
-                val totalPages = document.numberOfPages
-
-                for (pageIndex in 0 until totalPages) {
-                    // Render page to bitmap (300 DPI for good OCR quality)
-                    val bitmap = renderer.renderImageWithDPI(pageIndex, 300f)
-
-                    // Run OCR on bitmap
-                    val pageText = extractTextFromBitmap(bitmap)
-
-                    if (pageText.isNotBlank()) {
-                        textBuilder.append(pageText)
-                        textBuilder.append("\n\n--- Page ${pageIndex + 1} ---\n\n")
-                    }
-
-                    // Clean up bitmap
-                    bitmap.recycle()
-                }
-
-                textBuilder.toString()
-            } finally {
-                document.close()
-            }
-        } ?: throw FileReadException("Failed to open PDF file for OCR")
-    }
-
-    /**
-     * Extract text from image using ML Kit OCR.
-     */
     private suspend fun extractTextFromImage(uri: Uri): String {
         val inputImage = InputImage.fromFilePath(context, uri)
         return extractTextFromInputImage(inputImage)
     }
 
-    /**
-     * Extract text from bitmap using ML Kit OCR.
-     */
     private suspend fun extractTextFromBitmap(bitmap: Bitmap): String {
         val inputImage = InputImage.fromBitmap(bitmap, 0)
         return extractTextFromInputImage(inputImage)
     }
 
-    /**
-     * Common OCR logic using ML Kit.
-     */
-    private suspend fun extractTextFromInputImage(
-        inputImage: InputImage
-    ): String = suspendCancellableCoroutine { cont ->
+    private suspend fun extractTextFromInputImage(inputImage: InputImage): String = suspendCancellableCoroutine { cont ->
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
         recognizer.process(inputImage)
-            .addOnSuccessListener { visionText ->
-                cont.resume(visionText.text)
-            }
-            .addOnFailureListener { e ->
-                cont.resumeWithException(
-                    OcrException("OCR failed: ${e.message}", e)
-                )
-            }
-
-        // Clean up on cancellation
-        cont.invokeOnCancellation {
-            recognizer.close()
-        }
+            .addOnSuccessListener { visionText -> cont.resume(visionText.text) }
+            .addOnFailureListener { e -> cont.resumeWithException(OcrException("OCR failed", e)) }
+        cont.invokeOnCancellation { recognizer.close() }
     }
 
-    /**
-     * Extract text from HTML file using Jsoup.
-     */
     private suspend fun extractTextFromHtml(uri: Uri): String = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            try {
-                val html = inputStream.bufferedReader().use { it.readText() }
-                val doc = Jsoup.parse(html)
-
-                // Remove script, style, and nav elements
-                doc.select("script, style, nav, header, footer").remove()
-
-                // Get clean text
-                doc.body().text()
-            } catch (e: Exception) {
-                throw FileReadException("Failed to parse HTML: ${e.message}")
-            }
+            val html = inputStream.bufferedReader().use { it.readText() }
+            val doc = Jsoup.parse(html)
+            doc.select("script, style, nav, header, footer").remove()
+            doc.body().text()
         } ?: throw FileReadException("Failed to open HTML file")
     }
 
-    /**
-     * Extract text from plain text file (.txt, .md).
-     */
     private suspend fun extractTextFromPlainText(uri: Uri): String = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             inputStream.bufferedReader().use { it.readText() }
         } ?: throw FileReadException("Failed to open text file")
     }
 
-    /**
-     * Check if a PDF is likely scanned (needs OCR).
-     */
-    suspend fun isScannedPdf(uri: Uri): Boolean {
-        return try {
-            withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val document = PDDocument.load(inputStream)
-                    try {
-                        val stripper = PDFTextStripper()
-                        val text = stripper.getText(document)
-                        text.trim().length < 50 // Less than 50 chars = probably scanned
-                    } finally {
-                        document.close()
-                    }
-                } ?: false
-            }
-        } catch (e: Exception) {
-            false
-        }
+    private fun chunkPlainText(text: String): List<String> {
+        // Split large text files into chunks of ~4000 chars (safe for AI)
+        return text.chunked(4000)
     }
 }
-
-// ========== EXCEPTIONS ==========
 
 class UnsupportedFileTypeException(message: String) : Exception(message)
 class FileReadException(message: String) : Exception(message)

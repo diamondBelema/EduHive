@@ -1,24 +1,18 @@
 package com.dibe.eduhive.data.source.ai
 
-import com.dibe.eduhive.domain.model.Quiz
-import com.dibe.eduhive.domain.model.QuizQuestion
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * AI Data Source for MediaPipe with high-performance implementations.
+ * AI Data Source for MediaPipe.
  *
- * Features:
- * - Streaming responses for real-time UI updates
- * - Batch processing for large documents
- * - Parallel chunk processing
+ * Handles the logic of building prompts and parsing responses.
+ * Optimized for large documents by supporting page-by-page processing.
  */
 @Singleton
 class AIDataSource @Inject constructor(
@@ -27,10 +21,11 @@ class AIDataSource @Inject constructor(
 ) {
 
     /**
-     * 🚀 STREAMING: Extract concepts with real-time progress.
+     * Extract concepts from a list of pages with streaming progress.
+     * This is the preferred method for PDFs.
      */
-    fun extractConceptsStreaming(
-        text: String,
+    fun extractConceptsFromPagesStreaming(
+        pages: List<String>,
         hiveContext: String = ""
     ): Flow<ConceptExtractionState> = channelFlow {
         send(ConceptExtractionState.Loading)
@@ -40,31 +35,40 @@ class AIDataSource @Inject constructor(
             return@channelFlow
         }
 
-        val prompt = buildConceptExtractionPrompt(text, hiveContext)
+        val allExtractedConcepts = mutableListOf<ExtractedConcept>()
+        val totalPages = pages.size
 
-        modelManager.generateStreaming(prompt)
-            .collect { result ->
-                when (result) {
-                    is GenerationResult.Progress -> {
-                        send(ConceptExtractionState.Progress(
-                            percent = (result.completedChunks * 100) / result.totalChunks
-                        ))
-                    }
-                    is GenerationResult.Success -> {
-                        val concepts = parseConceptsFast(result.text)
-                        send(ConceptExtractionState.Success(concepts))
-                    }
-                    is GenerationResult.Error -> {
-                        send(ConceptExtractionState.Error(
-                            result.exception.message ?: "Extraction failed"
-                        ))
-                    }
-                }
+        pages.forEachIndexed { index, page ->
+            send(ConceptExtractionState.Progress(((index.toFloat() / totalPages) * 100).toInt()))
+            
+            val prompt = buildConceptExtractionPrompt(page, hiveContext)
+            
+            // Process individual page
+            val result = modelManager.generate(prompt)
+            
+            result.onSuccess { response ->
+                val pageConcepts = parseConceptsFast(response)
+                allExtractedConcepts.addAll(pageConcepts)
+            }.onFailure { e ->
+                // We continue to next page even if one fails
             }
+        }
+
+        // Deduplicate and finish
+        val uniqueConcepts = deduplicateConcepts(allExtractedConcepts)
+        send(ConceptExtractionState.Success(uniqueConcepts))
     }.flowOn(Dispatchers.IO)
 
     /**
-     * ⚡ STANDARD: Extract concepts (blocking, for compatibility).
+     * Legacy streaming for a single block of text.
+     */
+    fun extractConceptsStreaming(
+        text: String,
+        hiveContext: String = ""
+    ): Flow<ConceptExtractionState> = extractConceptsFromPagesStreaming(listOf(text), hiveContext)
+
+    /**
+     * Extract concepts (blocking version).
      */
     suspend fun extractConcepts(
         text: String,
@@ -76,34 +80,15 @@ class AIDataSource @Inject constructor(
             }
 
             val prompt = buildConceptExtractionPrompt(text, hiveContext)
-
-            // Collect streaming result into single response
-            var finalResult: List<ExtractedConcept>? = null
-            var finalError: Throwable? = null
-
-            modelManager.generateStreaming(prompt).collect { result ->
-                when (result) {
-                    is GenerationResult.Success -> {
-                        finalResult = parseConceptsFast(result.text)
-                    }
-                    is GenerationResult.Error -> {
-                        finalError = result.exception
-                    }
-                    else -> { /* Ignore progress */ }
-                }
-            }
-
-            finalResult?.let { Result.success(it) }
-                ?: Result.failure(finalError ?: IllegalStateException("No result"))
-
+            val response = modelManager.generate(prompt).getOrThrow()
+            Result.success(parseConceptsFast(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     /**
-     * 📄 BATCH PROCESSING: Extract concepts from multiple pages efficiently.
-     * Processes pages in parallel batches and deduplicates results.
+     * Extract concepts from multiple pages (blocking version).
      */
     suspend fun extractConceptsFromDocument(
         pages: List<String>,
@@ -114,41 +99,20 @@ class AIDataSource @Inject constructor(
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
 
-            // Process pages in parallel batches
             val pageResults = modelManager.processDocumentBatched(
                 pages = pages,
-                operation = { page -> buildConceptExtractionPrompt(page, hiveContext) },
-                batchSize = 3
+                operation = { page -> buildConceptExtractionPrompt(page, hiveContext) }
             )
 
-            // Merge and deduplicate concepts from all pages
-            val allConcepts = pageResults.flatMap { response ->
-                parseConceptsFast(response)
-            }
-
-            // Deduplicate by name (case-insensitive)
-            val uniqueConcepts = allConcepts
-                .distinctBy { it.name.lowercase().trim() }
-                // Merge descriptions for duplicates
-                .map { concept ->
-                    val similar = allConcepts.filter {
-                        it.name.lowercase().trim() == concept.name.lowercase().trim()
-                    }
-                    if (similar.size > 1) {
-                        concept.copy(
-                            description = similar.map { it.description }.distinct().joinToString(" ")
-                        )
-                    } else concept
-                }
-
-            Result.success(uniqueConcepts)
+            val allConcepts = pageResults.flatMap { parseConceptsFast(it) }
+            Result.success(deduplicateConcepts(allConcepts))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     /**
-     * 🚀 STREAMING: Generate flashcards with progress.
+     * Generate flashcards with streaming.
      */
     fun generateFlashcardsStreaming(
         conceptName: String,
@@ -163,26 +127,17 @@ class AIDataSource @Inject constructor(
         }
 
         val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
+        val result = modelManager.generate(prompt)
 
-        modelManager.generateStreaming(prompt)
-            .collect { result ->
-                when (result) {
-                    is GenerationResult.Success -> {
-                        val flashcards = parseFlashcardsFast(result.text)
-                        send(FlashcardGenerationState.Success(flashcards))
-                    }
-                    is GenerationResult.Error -> {
-                        send(FlashcardGenerationState.Error(
-                            result.exception.message ?: "Generation failed"
-                        ))
-                    }
-                    else -> { /* Ignore progress for flashcards */ }
-                }
-            }
+        result.onSuccess { response ->
+            send(FlashcardGenerationState.Success(parseFlashcardsFast(response)))
+        }.onFailure { e ->
+            send(FlashcardGenerationState.Error(e.message ?: "Failed to generate flashcards"))
+        }
     }.flowOn(Dispatchers.IO)
 
     /**
-     * ⚡ STANDARD: Generate flashcards (blocking).
+     * Generate flashcards (blocking).
      */
     suspend fun generateFlashcards(
         conceptName: String,
@@ -193,34 +148,16 @@ class AIDataSource @Inject constructor(
             if (!ensureModelLoaded()) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-
             val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
-
-            var finalResult: List<GeneratedFlashcard>? = null
-            var finalError: Throwable? = null
-
-            modelManager.generateStreaming(prompt).collect { result ->
-                when (result) {
-                    is GenerationResult.Success -> {
-                        finalResult = parseFlashcardsFast(result.text)
-                    }
-                    is GenerationResult.Error -> {
-                        finalError = result.exception
-                    }
-                    else -> { }
-                }
-            }
-
-            finalResult?.let { Result.success(it) }
-                ?: Result.failure(finalError ?: IllegalStateException("No result"))
-
+            val response = modelManager.generate(prompt).getOrThrow()
+            Result.success(parseFlashcardsFast(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     /**
-     * 🚀 STREAMING: Generate quiz questions with progress.
+     * Generate quiz questions with streaming progress.
      */
     fun generateQuizStreaming(
         conceptName: String,
@@ -235,30 +172,27 @@ class AIDataSource @Inject constructor(
         }
 
         val prompt = buildQuizPrompt(conceptName, conceptDescription, questionCount)
-
-        modelManager.generateStreaming(prompt)
-            .collect { result ->
-                when (result) {
-                    is GenerationResult.Progress -> {
-                        send(QuizGenerationState.Generating(
-                            percent = (result.completedChunks * 100) / result.totalChunks
-                        ))
-                    }
-                    is GenerationResult.Success -> {
-                        val questions = parseQuizFromResponse(result.text)
-                        send(QuizGenerationState.Success(questions))
-                    }
-                    is GenerationResult.Error -> {
-                        send(QuizGenerationState.Error(
-                            result.exception.message ?: "Quiz generation failed"
-                        ))
-                    }
+        
+        modelManager.generateStreaming(prompt).collect { result ->
+            when (result) {
+                is GenerationResult.Progress -> {
+                    send(QuizGenerationState.Generating(
+                        percent = (result.completedChunks * 100) / result.totalChunks
+                    ))
+                }
+                is GenerationResult.Success -> {
+                    val questions = parseQuizFromResponse(result.text)
+                    send(QuizGenerationState.Success(questions))
+                }
+                is GenerationResult.Error -> {
+                    send(QuizGenerationState.Error(result.exception.message ?: "Quiz generation failed"))
                 }
             }
+        }
     }.flowOn(Dispatchers.IO)
 
     /**
-     * ⚡ STANDARD: Generate quiz (blocking).
+     * Generate quiz (blocking version).
      */
     suspend fun generateQuiz(
         conceptName: String,
@@ -269,181 +203,115 @@ class AIDataSource @Inject constructor(
             if (!ensureModelLoaded()) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-
             val prompt = buildQuizPrompt(conceptName, conceptDescription, questionCount)
-
-            var finalResult: List<GeneratedQuizQuestion>? = null
-            var finalError: Throwable? = null
-
-            modelManager.generateStreaming(prompt).collect { result ->
-                when (result) {
-                    is GenerationResult.Success -> {
-                        finalResult = parseQuizFromResponse(result.text)
-                    }
-                    is GenerationResult.Error -> {
-                        finalError = result.exception
-                    }
-                    else -> { }
-                }
-            }
-
-            finalResult?.let { Result.success(it) }
-                ?: Result.failure(finalError ?: IllegalStateException("No result"))
-
+            val response = modelManager.generate(prompt).getOrThrow()
+            Result.success(parseQuizFromResponse(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-
-    /**
-     * Simple chat.
-     */
-    suspend fun chat(message: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            if (!ensureModelLoaded()) {
-                return@withContext Result.failure(IllegalStateException("No model available"))
-            }
-            modelManager.generate(message)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // ========== HELPER METHODS ==========
 
     private suspend fun ensureModelLoaded(): Boolean {
         if (modelManager.isModelLoaded()) return true
-
         val modelId = modelPreferences.getActiveModel() ?: return false
         return modelManager.loadModel(modelId).isSuccess
     }
 
+    private fun deduplicateConcepts(concepts: List<ExtractedConcept>): List<ExtractedConcept> {
+        return concepts.distinctBy { it.name.lowercase().trim() }
+    }
+
     private fun buildConceptExtractionPrompt(text: String, context: String): String {
-        return buildString(512) {
-            appendLine("Extract 3-10 key concepts from this educational material.")
-            if (context.isNotEmpty()) appendLine("Context: $context")
-            appendLine()
-            appendLine("Material:")
-            appendLine(text.take(15000)) // Safety limit
-            appendLine()
-            appendLine("For each concept, provide:")
-            appendLine("1. Name (2-5 words)")
-            appendLine("2. Description (1-2 sentences)")
-            appendLine()
-            appendLine("Format EXACTLY like this:")
-            appendLine()
-            appendLine("CONCEPT: Mitochondria Function")
-            appendLine("DESCRIPTION: Organelles that produce ATP through cellular respiration.")
-            appendLine()
-            appendLine("CONCEPT: DNA Structure")
-            appendLine("DESCRIPTION: Double helix structure containing genetic information.")
-        }
+        return """
+            Extract 3-10 key concepts from this educational material.
+            ${if (context.isNotEmpty()) "Context: $context\n" else ""}
+            Material:
+            $text
+            
+            For each concept, provide:
+            1. Name (2-5 words)
+            2. Description (1-2 sentences)
+            
+            Format EXACTLY like this:
+            CONCEPT: [Name]
+            DESCRIPTION: [Description]
+        """.trimIndent()
     }
 
     private fun buildFlashcardPrompt(name: String, description: String, count: Int): String {
-        return buildString(256) {
-            appendLine("Create $count flashcards about: $name")
-            appendLine("Description: $description")
-            appendLine()
-            appendLine("Format EXACTLY like this:")
-            appendLine()
-            appendLine("FLASHCARD 1")
-            appendLine("FRONT: What is the primary function of mitochondria?")
-            appendLine("BACK: To produce ATP through cellular respiration.")
-            appendLine()
-            appendLine("FLASHCARD 2")
-            appendLine("FRONT: Why are mitochondria called the powerhouse?")
-            appendLine("BACK: Because they generate energy for the cell.")
-            appendLine()
-            appendLine("Create all $count flashcards.")
-        }
+        return """
+            Create $count flashcards about: $name
+            Description: $description
+            
+            Format EXACTLY like this:
+            FLASHCARD 1
+            FRONT: [Question]
+            BACK: [Answer]
+        """.trimIndent()
     }
 
     private fun buildQuizPrompt(name: String, description: String, count: Int): String {
-        return buildString(512) {
-            appendLine("Create $count quiz questions about: $name")
-            appendLine("Description: $description")
-            appendLine()
-            appendLine("Include a mix of:")
-            appendLine("- Multiple Choice (MCQ)")
-            appendLine("- True/False")
-            appendLine()
-            appendLine("Format EXACTLY like this:")
-            appendLine()
-            appendLine("QUESTION 1")
-            appendLine("TYPE: MCQ")
-            appendLine("TEXT: What molecule does mitochondria produce?")
-            appendLine("OPTION A: ATP")
-            appendLine("OPTION B: DNA")
-            appendLine("OPTION C: RNA")
-            appendLine("OPTION D: Glucose")
-            appendLine("CORRECT: A")
-            appendLine()
-            appendLine("QUESTION 2")
-            appendLine("TYPE: TRUE_FALSE")
-            appendLine("TEXT: Mitochondria contain their own DNA.")
-            appendLine("CORRECT: TRUE")
-            appendLine()
-            appendLine("Create all $count questions now.")
-        }
+        return """
+            Create $count quiz questions about: $name
+            Description: $description
+            
+            Include a mix of:
+            - Multiple Choice (MCQ)
+            - True/False
+            
+            Format EXACTLY like this:
+            
+            QUESTION 1
+            TYPE: MCQ
+            TEXT: [Question Text]
+            OPTION A: [Option A]
+            OPTION B: [Option B]
+            OPTION C: [Option C]
+            OPTION D: [Option D]
+            CORRECT: A
+            
+            QUESTION 2
+            TYPE: TRUE_FALSE
+            TEXT: [Question Text]
+            CORRECT: TRUE
+            
+            Create all $count questions now.
+        """.trimIndent()
     }
 
-    /**
-     * Fast parsing without regex overhead.
-     */
     private fun parseConceptsFast(response: String): List<ExtractedConcept> {
         val concepts = mutableListOf<ExtractedConcept>()
         val lines = response.lines()
-        var i = 0
+        var currentName: String? = null
 
-        while (i < lines.size) {
-            val line = lines[i].trim()
-            when {
-                line.startsWith("CONCEPT:", ignoreCase = true) -> {
-                    val name = line.substring(8).trim()
-                    var description = ""
-
-                    // Look ahead for description
-                    if (i + 1 < lines.size) {
-                        val nextLine = lines[i + 1].trim()
-                        if (nextLine.startsWith("DESCRIPTION:", ignoreCase = true)) {
-                            description = nextLine.substring(12).trim()
-                            i++
-                        }
-                    }
-
-                    if (name.isNotEmpty()) {
-                        concepts.add(ExtractedConcept(name, description))
-                    }
-                }
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("CONCEPT:", ignoreCase = true)) {
+                currentName = trimmed.substringAfter(":").trim()
+            } else if (trimmed.startsWith("DESCRIPTION:", ignoreCase = true) && currentName != null) {
+                val description = trimmed.substringAfter(":").trim()
+                concepts.add(ExtractedConcept(currentName, description))
+                currentName = null
             }
-            i++
         }
-
         return concepts
     }
 
     private fun parseFlashcardsFast(response: String): List<GeneratedFlashcard> {
         val flashcards = mutableListOf<GeneratedFlashcard>()
         val lines = response.lines()
-        var i = 0
         var currentFront: String? = null
 
-        while (i < lines.size) {
-            val line = lines[i].trim()
-            when {
-                line.startsWith("FRONT:", ignoreCase = true) -> {
-                    currentFront = line.substring(6).trim()
-                }
-                line.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
-                    val back = line.substring(5).trim()
-                    flashcards.add(GeneratedFlashcard(currentFront, back))
-                    currentFront = null
-                }
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("FRONT:", ignoreCase = true)) {
+                currentFront = trimmed.substringAfter(":").trim()
+            } else if (trimmed.startsWith("BACK:", ignoreCase = true) && currentFront != null) {
+                val back = trimmed.substringAfter(":").trim()
+                flashcards.add(GeneratedFlashcard(currentFront, back))
+                currentFront = null
             }
-            i++
         }
-
         return flashcards
     }
 
@@ -463,59 +331,31 @@ class AIDataSource @Inject constructor(
             for (line in lines) {
                 val trimmed = line.trim()
                 when {
-                    trimmed.startsWith("TYPE:", ignoreCase = true) -> {
-                        type = trimmed.substring(5).trim()
-                    }
-                    trimmed.startsWith("TEXT:", ignoreCase = true) -> {
-                        text = trimmed.substring(5).trim()
-                    }
+                    trimmed.startsWith("TYPE:", ignoreCase = true) -> type = trimmed.substring(5).trim()
+                    trimmed.startsWith("TEXT:", ignoreCase = true) -> text = trimmed.substring(5).trim()
                     trimmed.startsWith("OPTION", ignoreCase = true) -> {
                         val optionText = trimmed.substringAfter(":", "").trim()
                         if (optionText.isNotEmpty()) options.add(optionText)
                     }
-                    trimmed.startsWith("CORRECT:", ignoreCase = true) -> {
-                        correct = trimmed.substring(8).trim()
-                    }
+                    trimmed.startsWith("CORRECT:", ignoreCase = true) -> correct = trimmed.substring(8).trim()
                 }
             }
 
             if (text.isNotEmpty()) {
-                questions.add(GeneratedQuizQuestion(
-                    type = type,
-                    text = text,
-                    options = options.ifEmpty { null },
-                    correctAnswer = correct
-                ))
+                questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, correct))
             }
         }
-
         return questions
     }
+
+    suspend fun chat(message: String): Result<String> = modelManager.generate(message)
 }
 
-// ========== DATA CLASSES ==========
+// ========== DATA & STATE CLASSES ==========
 
-data class ExtractedConcept(
-    val name: String,
-    val description: String
-)
-
-data class GeneratedFlashcard(
-    val front: String,
-    val back: String
-)
-
-/**
- * Generated quiz question from AI.
- */
-data class GeneratedQuizQuestion(
-    val type: String,
-    val text: String,
-    val options: List<String>?,
-    val correctAnswer: String
-)
-
-// ========== STATE CLASSES ==========
+data class ExtractedConcept(val name: String, val description: String)
+data class GeneratedFlashcard(val front: String, val back: String)
+data class GeneratedQuizQuestion(val type: String, val text: String, val options: List<String>?, val correctAnswer: String)
 
 sealed class ConceptExtractionState {
     object Loading : ConceptExtractionState()
@@ -536,4 +376,3 @@ sealed class QuizGenerationState {
     data class Success(val questions: List<GeneratedQuizQuestion>) : QuizGenerationState()
     data class Error(val message: String) : QuizGenerationState()
 }
-
