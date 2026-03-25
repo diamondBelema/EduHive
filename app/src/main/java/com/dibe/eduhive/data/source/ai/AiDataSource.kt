@@ -14,13 +14,24 @@ import javax.inject.Singleton
  * AI Data Source for MediaPipe.
  *
  * Handles the logic of building prompts and parsing responses.
- * Optimized for large documents by supporting page-by-page processing.
+ * Implements multi-stage generation: draft → validate → refine → store.
  */
 @Singleton
 class AIDataSource @Inject constructor(
     private val modelManager: AIModelManager,
-    private val modelPreferences: ModelPreferences
+    private val modelPreferences: ModelPreferences,
+    private val flashcardValidator: FlashcardValidator
 ) {
+
+    companion object {
+        private const val TAG = "AIDataSource"
+
+        /** Minimum flashcard pass rate before triggering a refinement pass. */
+        private const val MIN_PASS_RATE = 0.7f
+
+        /** Maximum concepts to group in a single batched flashcard request. */
+        const val BATCH_SIZE = 5
+    }
 
     /**
      * Extract concepts from a list of pages with streaming progress.
@@ -43,7 +54,7 @@ class AIDataSource @Inject constructor(
         pages.forEachIndexed { index, page ->
             send(ConceptExtractionState.Progress(((index.toFloat() / totalPages) * 100).toInt()))
 
-            val prompt = buildConceptExtractionPrompt(page, hiveContext)
+            val prompt = LLMPromptTemplates.conceptExtraction(page, hiveContext)
             val result = modelManager.generate(prompt)
 
             result.onSuccess { response ->
@@ -86,7 +97,7 @@ class AIDataSource @Inject constructor(
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
 
-            val prompt = buildConceptExtractionPrompt(text, hiveContext)
+            val prompt = LLMPromptTemplates.conceptExtraction(text, hiveContext)
             val response = modelManager.generate(prompt).getOrThrow()
             Result.success(parseConceptsRobust(response))
         } catch (e: Exception) {
@@ -108,7 +119,7 @@ class AIDataSource @Inject constructor(
 
             val pageResults = modelManager.processDocumentBatched(
                 pages = pages,
-                operation = { page -> buildConceptExtractionPrompt(page, hiveContext) }
+                operation = { page -> LLMPromptTemplates.conceptExtraction(page, hiveContext) }
             )
 
             val allConcepts = pageResults.flatMap {
@@ -122,6 +133,8 @@ class AIDataSource @Inject constructor(
 
     /**
      * Generate flashcards with streaming.
+     *
+     * Applies two-pass generation: draft → validate → refine if needed.
      */
     fun generateFlashcardsStreaming(
         conceptName: String,
@@ -135,18 +148,14 @@ class AIDataSource @Inject constructor(
             return@channelFlow
         }
 
-        val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
-        val result = modelManager.generate(prompt)
-
-        result.onSuccess { response ->
-            send(FlashcardGenerationState.Success(parseFlashcardsRobust(response)))
-        }.onFailure { e ->
-            send(FlashcardGenerationState.Error(e.message ?: "Failed to generate flashcards"))
-        }
+        val flashcards = generateWithValidation(conceptName, conceptDescription, count)
+        send(FlashcardGenerationState.Success(flashcards))
     }.flowOn(Dispatchers.IO)
 
     /**
      * Generate flashcards (blocking).
+     *
+     * Applies two-pass generation: draft → validate → refine if needed.
      */
     suspend fun generateFlashcards(
         conceptName: String,
@@ -157,9 +166,35 @@ class AIDataSource @Inject constructor(
             if (!ensureModelLoaded()) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-            val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
+            val flashcards = generateWithValidation(conceptName, conceptDescription, count)
+            Result.success(flashcards)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Generate flashcards for a batch of concepts in a single request.
+     *
+     * Grouping 3–5 concepts per call improves global context, reduces duplicate
+     * questions, and produces more diverse flashcards.
+     *
+     * Returns a list of pairs: (conceptIndex, GeneratedFlashcard) where conceptIndex
+     * is 1-based, matching the concept order in [concepts].
+     */
+    suspend fun generateFlashcardsBatch(
+        concepts: List<Pair<String, String>>,
+        countPerConcept: Int = 5
+    ): Result<List<Pair<Int, GeneratedFlashcard>>> = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureModelLoaded()) {
+                return@withContext Result.failure(IllegalStateException("No model available"))
+            }
+            val prompt = LLMPromptTemplates.flashcardBatch(concepts, countPerConcept)
             val response = modelManager.generate(prompt).getOrThrow()
-            Result.success(parseFlashcardsRobust(response))
+            val parsed = parseFlashcardsWithConceptIndex(response, concepts.size)
+            val validated = parsed.filter { (_, card) -> flashcardValidator.validate(card).isValid }
+            Result.success(validated)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -180,7 +215,7 @@ class AIDataSource @Inject constructor(
             return@channelFlow
         }
 
-        val prompt = buildQuizPrompt(conceptName, conceptDescription, questionCount)
+        val prompt = LLMPromptTemplates.quizGeneration(conceptName, conceptDescription, questionCount)
         
         modelManager.generateStreaming(prompt).collect { result ->
             when (result) {
@@ -212,12 +247,84 @@ class AIDataSource @Inject constructor(
             if (!ensureModelLoaded()) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-            val prompt = buildQuizPrompt(conceptName, conceptDescription, questionCount)
+            val prompt = LLMPromptTemplates.quizGeneration(conceptName, conceptDescription, questionCount)
             val response = modelManager.generate(prompt).getOrThrow()
             Result.success(parseQuizFromResponse(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Two-pass generation with retry and mutation.
+     *
+     * Pass 1: Generate draft flashcards.
+     * Validate: Check quality with [FlashcardValidator].
+     * If pass rate < [MIN_PASS_RATE]: Retry with prompt mutations, then refine.
+     * Pass 2 (if needed): Refine draft flashcards that failed validation.
+     */
+    private suspend fun generateWithValidation(
+        conceptName: String,
+        conceptDescription: String,
+        count: Int
+    ): List<GeneratedFlashcard> {
+        val basePrompt = LLMPromptTemplates.flashcardDraft(conceptName, conceptDescription, count)
+
+        // Retry with prompt mutation if quality is too low
+        var bestDraft: List<GeneratedFlashcard> = emptyList()
+        var bestPassRate = 0f
+        var earlySuccess = false
+
+        for (attempt in 0 until GenerationConfig.FLASHCARD.retryAttempts) {
+            val mutatedPrompt = LLMPromptTemplates.mutate(basePrompt, attempt)
+            val result = modelManager.generate(mutatedPrompt)
+
+            result.onSuccess { response ->
+                val parsed = parseFlashcardsRobust(response)
+                val passRate = flashcardValidator.passRate(parsed)
+                Log.d(TAG, "Attempt $attempt: ${parsed.size} cards, pass rate=$passRate")
+
+                if (passRate > bestPassRate) {
+                    bestPassRate = passRate
+                    bestDraft = parsed
+                }
+
+                if (passRate >= MIN_PASS_RATE) {
+                    earlySuccess = true
+                }
+            }.onFailure { e ->
+                Log.w(TAG, "Generation attempt $attempt failed: ${e.message}")
+            }
+
+            if (earlySuccess) break
+        }
+
+        if (earlySuccess) {
+            return flashcardValidator.filterValid(bestDraft)
+        }
+
+        // Pass 2: Refine if pass rate still below threshold
+        val validFromDraft = flashcardValidator.filterValid(bestDraft)
+        val invalidFromDraft = bestDraft.filter { !flashcardValidator.validate(it).isValid }
+
+        if (invalidFromDraft.isNotEmpty() && bestPassRate < MIN_PASS_RATE) {
+            Log.d(TAG, "Pass 2: Refining ${invalidFromDraft.size} low-quality flashcards")
+            val refinementPrompt = LLMPromptTemplates.flashcardRefinement(invalidFromDraft)
+            val refinedResult = modelManager.generate(refinementPrompt)
+
+            var refinedCards: List<GeneratedFlashcard> = emptyList()
+            refinedResult.onSuccess { refinedResponse ->
+                refinedCards = flashcardValidator.filterValid(parseFlashcardsRobust(refinedResponse))
+            }.onFailure { e ->
+                Log.w(TAG, "Refinement pass failed: ${e.message}")
+            }
+
+            if (refinedCards.isNotEmpty()) {
+                return (validFromDraft + refinedCards).distinctBy { it.front.lowercase().trim() }
+            }
+        }
+
+        return validFromDraft.ifEmpty { bestDraft }
     }
 
     private suspend fun ensureModelLoaded(): Boolean {
@@ -228,58 +335,6 @@ class AIDataSource @Inject constructor(
 
     private fun deduplicateConcepts(concepts: List<ExtractedConcept>): List<ExtractedConcept> {
         return concepts.distinctBy { it.name.lowercase().trim() }
-    }
-
-    private fun buildConceptExtractionPrompt(text: String, context: String): String {
-        val templateOverhead = 200
-        val maxTextChars = AIModelManager.MAX_INPUT_CHARS - templateOverhead
-
-        val safeText = if (text.length > maxTextChars) {
-            text.take(maxTextChars).substringBeforeLast(' ')
-        } else text
-
-        return """
-        Extract important educational concepts from the following text.
-        ${if (context.isNotEmpty()) "Goal: $context\n" else ""}
-        Text:
-        $safeText
-        
-        Output format:
-        CONCEPT: [Simple Name]
-        DESCRIPTION: [Clear Explanation]
-        
-        Provide 3 to 8 concepts.
-    """.trimIndent()
-    }
-
-    private fun buildFlashcardPrompt(name: String, description: String, count: Int): String {
-        return """
-            Create $count flashcards for: $name
-            Information: $description
-            
-            Format:
-            FRONT: [Short Question]
-            BACK: [Concise Answer]
-        """.trimIndent()
-    }
-
-    private fun buildQuizPrompt(name: String, description: String, count: Int): String {
-        return """
-            Create $count quiz questions about: $name
-            Description: $description
-            
-            Types: MCQ or TRUE_FALSE.
-            
-            Format:
-            QUESTION 1
-            TYPE: MCQ
-            TEXT: [Question]
-            OPTION A: [Option]
-            OPTION B: [Option]
-            OPTION C: [Option]
-            OPTION D: [Option]
-            CORRECT: A
-        """.trimIndent()
     }
 
     private fun parseConceptsRobust(response: String): List<ExtractedConcept> {
@@ -320,6 +375,56 @@ class AIDataSource @Inject constructor(
             }
         }
         return flashcards
+    }
+
+    /**
+     * Parses flashcards from a batch response that includes CONCEPT: tags.
+     *
+     * Returns pairs of (1-based conceptIndex, GeneratedFlashcard).
+     * Falls back to round-robin distribution if CONCEPT tags are missing.
+     */
+    private fun parseFlashcardsWithConceptIndex(
+        response: String,
+        conceptCount: Int
+    ): List<Pair<Int, GeneratedFlashcard>> {
+        val result = mutableListOf<Pair<Int, GeneratedFlashcard>>()
+        val lines = response.lines()
+        var currentConceptIndex = 1
+        var conceptTagSeenForCurrentCard = false
+        var currentFront: String? = null
+        var cardCount = 0
+
+        for (line in lines) {
+            val cleanLine = line.replace("*", "").trim()
+            when {
+                cleanLine.startsWith("CONCEPT:", ignoreCase = true) -> {
+                    val indexStr = cleanLine.substringAfter(":").trim()
+                    val parsed = indexStr.toIntOrNull()
+                    if (parsed != null && parsed in 1..conceptCount) {
+                        currentConceptIndex = parsed
+                        conceptTagSeenForCurrentCard = true
+                    }
+                }
+                cleanLine.startsWith("FRONT:", ignoreCase = true) -> {
+                    currentFront = cleanLine.substringAfter(":").trim().removePrefix("[").removeSuffix("]")
+                }
+                cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
+                    val front = currentFront ?: ""
+                    val back = cleanLine.substringAfter(":").trim().removePrefix("[").removeSuffix("]")
+                    if (front.isNotBlank() && back.isNotEmpty()) {
+                        result.add(Pair(currentConceptIndex, GeneratedFlashcard(front, back)))
+                        cardCount++
+                        // Advance concept index round-robin when no CONCEPT tag was provided
+                        if (!conceptTagSeenForCurrentCard && conceptCount > 1) {
+                            currentConceptIndex = (cardCount % conceptCount) + 1
+                        }
+                    }
+                    currentFront = null
+                    conceptTagSeenForCurrentCard = false
+                }
+            }
+        }
+        return result
     }
 
     private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
@@ -383,3 +488,4 @@ sealed class QuizGenerationState {
     data class Success(val questions: List<GeneratedQuizQuestion>) : QuizGenerationState()
     data class Error(val message: String) : QuizGenerationState()
 }
+
