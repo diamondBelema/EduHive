@@ -116,7 +116,10 @@ fun AddMaterialScreen(
                     ProcessingStateExpressive(
                         status = state.processingStatus ?: "Connecting to Hive...",
                         progress = state.progressPercentage / 100f,
-                        successMessage = state.successMessage
+                        successMessage = state.successMessage,
+                        flashcardsValid = state.flashcardsValid,
+                        flashcardsRejected = state.flashcardsRejected,
+                        duplicatesFound = state.duplicatesFound
                     )
                 } else {
                     ImportSelectionExpressive(
@@ -276,7 +279,10 @@ fun ImportCardExpressive(
 fun ProcessingStateExpressive(
     status: String,
     progress: Float,
-    successMessage: String?
+    successMessage: String?,
+    flashcardsValid: Int = 0,
+    flashcardsRejected: Int = 0,
+    duplicatesFound: Int = 0
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -336,7 +342,22 @@ fun ProcessingStateExpressive(
             }
         }
 
-        Spacer(modifier = Modifier.height(64.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Quality badges — visible once validation data is available
+        AnimatedVisibility(
+            visible = flashcardsValid > 0 || flashcardsRejected > 0,
+            enter = fadeIn()
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                if (flashcardsValid > 0) QualityBadge(QualityStatus.VALID, flashcardsValid)
+                if (flashcardsRejected > 0) QualityBadge(QualityStatus.REJECTED, flashcardsRejected)
+                if (duplicatesFound > 0) QualityBadge(QualityStatus.FLAGGED, duplicatesFound)
+            }
+        }
 
         // Expressive Status Pill
         Surface(
@@ -369,15 +390,28 @@ fun ProcessingStateExpressive(
             visible = successMessage != null,
             enter = slideInVertically { it / 2 } + fadeIn()
         ) {
-            successMessage?.let {
-                Text(
-                    it,
-                    modifier = Modifier.padding(top = 24.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            Column(
+                modifier = Modifier.padding(top = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                successMessage?.let {
+                    Text(
+                        it,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                // Detailed quality breakdown on completion
+                if (flashcardsValid > 0 || flashcardsRejected > 0) {
+                    ValidationSummary(
+                        flashcardsValid = flashcardsValid,
+                        flashcardsRejected = flashcardsRejected,
+                        duplicatesFound = duplicatesFound
+                    )
+                }
             }
         }
     }

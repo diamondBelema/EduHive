@@ -134,7 +134,10 @@ class AIDataSource @Inject constructor(
     /**
      * Generate flashcards with streaming.
      *
-     * Applies two-pass generation: draft → validate → refine if needed.
+     * Emits [FlashcardGenerationState.Retrying] during retry attempts,
+     * [FlashcardGenerationState.Validating] once the best draft is chosen,
+     * and [FlashcardGenerationState.Success] with the final validated cards
+     * and the count of cards that were rejected by the validator.
      */
     fun generateFlashcardsStreaming(
         conceptName: String,
@@ -148,8 +151,14 @@ class AIDataSource @Inject constructor(
             return@channelFlow
         }
 
-        val flashcards = generateWithValidation(conceptName, conceptDescription, count)
-        send(FlashcardGenerationState.Success(flashcards))
+        val result = generateWithValidation(
+            conceptName = conceptName,
+            conceptDescription = conceptDescription,
+            count = count,
+            onRetrying = { attempt -> send(FlashcardGenerationState.Retrying(attempt)) }
+        )
+        send(FlashcardGenerationState.Validating)
+        send(FlashcardGenerationState.Success(result.flashcards, result.rejectedCount))
     }.flowOn(Dispatchers.IO)
 
     /**
@@ -166,8 +175,8 @@ class AIDataSource @Inject constructor(
             if (!ensureModelLoaded()) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-            val flashcards = generateWithValidation(conceptName, conceptDescription, count)
-            Result.success(flashcards)
+            val result = generateWithValidation(conceptName, conceptDescription, count)
+            Result.success(result.flashcards)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -262,12 +271,16 @@ class AIDataSource @Inject constructor(
      * Validate: Check quality with [FlashcardValidator].
      * If pass rate < [MIN_PASS_RATE]: Retry with prompt mutations, then refine.
      * Pass 2 (if needed): Refine draft flashcards that failed validation.
+     *
+     * @param onRetrying Called before each retry attempt (attempt > 0) so callers can emit
+     *                   progress state to the UI.
      */
     private suspend fun generateWithValidation(
         conceptName: String,
         conceptDescription: String,
-        count: Int
-    ): List<GeneratedFlashcard> {
+        count: Int,
+        onRetrying: suspend (Int) -> Unit = {}
+    ): ValidationResult {
         val basePrompt = LLMPromptTemplates.flashcardDraft(conceptName, conceptDescription, count)
 
         // Retry with prompt mutation if quality is too low
@@ -276,6 +289,8 @@ class AIDataSource @Inject constructor(
         var earlySuccess = false
 
         for (attempt in 0 until GenerationConfig.FLASHCARD.retryAttempts) {
+            if (attempt > 0) onRetrying(attempt)
+
             val mutatedPrompt = LLMPromptTemplates.mutate(basePrompt, attempt)
             val result = modelManager.generate(mutatedPrompt)
 
@@ -300,7 +315,8 @@ class AIDataSource @Inject constructor(
         }
 
         if (earlySuccess) {
-            return flashcardValidator.filterValid(bestDraft)
+            val valid = flashcardValidator.filterValid(bestDraft)
+            return ValidationResult(valid, bestDraft.size - valid.size)
         }
 
         // Pass 2: Refine if pass rate still below threshold
@@ -320,11 +336,13 @@ class AIDataSource @Inject constructor(
             }
 
             if (refinedCards.isNotEmpty()) {
-                return (validFromDraft + refinedCards).distinctBy { it.front.lowercase().trim() }
+                val combined = (validFromDraft + refinedCards).distinctBy { it.front.lowercase().trim() }
+                return ValidationResult(combined, bestDraft.size - combined.size)
             }
         }
 
-        return validFromDraft.ifEmpty { bestDraft }
+        val finalCards = validFromDraft.ifEmpty { bestDraft }
+        return ValidationResult(finalCards, bestDraft.size - finalCards.size)
     }
 
     private suspend fun ensureModelLoaded(): Boolean {
@@ -469,6 +487,13 @@ data class ExtractedConcept(val name: String, val description: String)
 data class GeneratedFlashcard(val front: String, val back: String)
 data class GeneratedQuizQuestion(val type: String, val text: String, val options: List<String>?, val correctAnswer: String)
 
+/** Internal result of the two-pass validation pipeline. */
+private data class ValidationResult(
+    val flashcards: List<GeneratedFlashcard>,
+    /** Number of candidate cards that did not pass quality validation. */
+    val rejectedCount: Int
+)
+
 sealed class ConceptExtractionState {
     object Loading : ConceptExtractionState()
     data class Progress(val percent: Int) : ConceptExtractionState()
@@ -478,7 +503,15 @@ sealed class ConceptExtractionState {
 
 sealed class FlashcardGenerationState {
     object Loading : FlashcardGenerationState()
-    data class Success(val flashcards: List<GeneratedFlashcard>) : FlashcardGenerationState()
+    /** Emitted before each retry attempt (attempt index > 0). */
+    data class Retrying(val attempt: Int) : FlashcardGenerationState()
+    /** Emitted once draft generation finishes and validation is about to run. */
+    object Validating : FlashcardGenerationState()
+    data class Success(
+        val flashcards: List<GeneratedFlashcard>,
+        /** Count of candidate cards rejected by the quality validator. */
+        val rejectedCount: Int = 0
+    ) : FlashcardGenerationState()
     data class Error(val message: String) : FlashcardGenerationState()
 }
 

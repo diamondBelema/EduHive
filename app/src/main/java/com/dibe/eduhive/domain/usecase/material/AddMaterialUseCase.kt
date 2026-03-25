@@ -110,11 +110,15 @@ class AddMaterialUseCase @Inject constructor(
                 return@channelFlow
             }
 
-            // 4. Generate flashcards for each concept
-            var totalFlashcards = 0
+            // 4. Generate flashcards for each concept, tracking quality metrics
+            var totalValid = 0
+            var totalRejected = 0
+            val seenFronts = mutableSetOf<String>()
+            var duplicatesFound = 0
 
             finalConcepts.forEachIndexed { index, concept ->
                 send(MaterialProcessingProgress.GeneratingFlashcards(index + 1, finalConcepts.size))
+                send(MaterialProcessingProgress.ValidatingFlashcards(index + 1, finalConcepts.size))
 
                 flashcardRepository.generateFlashcardsForConceptStreaming(
                     conceptId = concept.id,
@@ -122,8 +126,29 @@ class AddMaterialUseCase @Inject constructor(
                     conceptDescription = concept.description ?: "",
                     count = 5
                 ).collect { progress ->
-                    if (progress is FlashcardGenerationProgress.Success) {
-                        totalFlashcards += progress.flashcards.size
+                    when (progress) {
+                        is FlashcardGenerationProgress.Retrying -> {
+                            send(MaterialProcessingProgress.RetryingGeneration(concept.name, progress.attempt))
+                        }
+                        is FlashcardGenerationProgress.Success -> {
+                            totalValid += progress.flashcards.size
+                            totalRejected += progress.rejectedCount
+
+                            // Cross-concept duplicate detection
+                            for (flashcard in progress.flashcards) {
+                                val key = flashcard.front.lowercase().trim()
+                                if (key in seenFronts) duplicatesFound++ else seenFronts.add(key)
+                            }
+
+                            send(MaterialProcessingProgress.ValidationProgress(
+                                current = index + 1,
+                                total = finalConcepts.size,
+                                valid = totalValid,
+                                flagged = 0,
+                                rejected = totalRejected
+                            ))
+                        }
+                        else -> {}
                     }
                 }
 
@@ -132,13 +157,19 @@ class AddMaterialUseCase @Inject constructor(
             }
 
             // 5. Finalize
+            send(MaterialProcessingProgress.DeduplicatingCards(duplicatesFound, totalValid + duplicatesFound))
+            delay(100)
+
             materialRepository.markAsProcessed(material.id)
 
             send(
-                MaterialProcessingProgress.Complete(
+                MaterialProcessingProgress.ProcessingSummary(
                     materialId = material.id,
                     conceptsCreated = finalConcepts.size,
-                    flashcardsCreated = totalFlashcards
+                    flashcardsValid = totalValid,
+                    flashcardsFlagged = 0,
+                    flashcardsRejected = totalRejected,
+                    duplicatesFound = duplicatesFound
                 )
             )
 
@@ -170,10 +201,31 @@ sealed class MaterialProcessingProgress {
     data class ExtractingConceptsProgress(val percent: Int) : MaterialProcessingProgress()
     data class ConceptsExtracted(val count: Int) : MaterialProcessingProgress()
     data class GeneratingFlashcards(val current: Int, val total: Int) : MaterialProcessingProgress()
-    data class Complete(
+
+    // Quality Control Stages
+    /** Emitted when quality validation begins for the concept at [current]/[total]. */
+    data class ValidatingFlashcards(val current: Int, val total: Int) : MaterialProcessingProgress()
+    /** Running quality totals after each concept finishes validation. */
+    data class ValidationProgress(
+        val current: Int,
+        val total: Int,
+        val valid: Int,
+        val flagged: Int,
+        val rejected: Int
+    ) : MaterialProcessingProgress()
+    /** Emitted when the AI retries generation for a concept that had too many bad cards. */
+    data class RetryingGeneration(val conceptName: String, val attemptNumber: Int) : MaterialProcessingProgress()
+    /** Emitted once cross-concept duplicate detection runs. */
+    data class DeduplicatingCards(val progress: Int, val total: Int) : MaterialProcessingProgress()
+    /** Terminal success state with full quality breakdown. */
+    data class ProcessingSummary(
         val materialId: String,
         val conceptsCreated: Int,
-        val flashcardsCreated: Int
+        val flashcardsValid: Int,
+        val flashcardsFlagged: Int,
+        val flashcardsRejected: Int,
+        val duplicatesFound: Int
     ) : MaterialProcessingProgress()
+
     data class Failed(val error: String) : MaterialProcessingProgress()
 }
