@@ -71,6 +71,12 @@ class FlashcardRepositoryImpl @Inject constructor(
                 is FlashcardGenerationState.Loading -> {
                     emit(FlashcardGenerationProgress.Loading)
                 }
+                is FlashcardGenerationState.Retrying -> {
+                    emit(FlashcardGenerationProgress.Retrying(state.attempt))
+                }
+                is FlashcardGenerationState.Validating -> {
+                    emit(FlashcardGenerationProgress.Validating)
+                }
                 is FlashcardGenerationState.Success -> {
                     val flashcards = state.flashcards.map { generated ->
                         Flashcard(
@@ -87,7 +93,7 @@ class FlashcardRepositoryImpl @Inject constructor(
                     // Save to database
                     addFlashcards(flashcards)
 
-                    emit(FlashcardGenerationProgress.Success(flashcards))
+                    emit(FlashcardGenerationProgress.Success(flashcards, state.rejectedCount))
                 }
                 is FlashcardGenerationState.Error -> {
                     emit(FlashcardGenerationProgress.Error(state.message))
@@ -176,6 +182,14 @@ class FlashcardRepositoryImpl @Inject constructor(
  */
 sealed class FlashcardGenerationProgress {
     object Loading : FlashcardGenerationProgress()
-    data class Success(val flashcards: List<Flashcard>) : FlashcardGenerationProgress()
+    /** Emitted before each retry attempt (attempt index > 0). */
+    data class Retrying(val attempt: Int) : FlashcardGenerationProgress()
+    /** Emitted when validation is running after draft generation. */
+    object Validating : FlashcardGenerationProgress()
+    data class Success(
+        val flashcards: List<Flashcard>,
+        /** Count of candidate cards rejected by the quality validator. */
+        val rejectedCount: Int = 0
+    ) : FlashcardGenerationProgress()
     data class Error(val message: String) : FlashcardGenerationProgress()
 }
