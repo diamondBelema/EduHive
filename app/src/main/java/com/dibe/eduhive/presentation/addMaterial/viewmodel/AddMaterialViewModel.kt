@@ -51,7 +51,10 @@ class AddMaterialViewModel @Inject constructor(
                             it.copy(
                                 isProcessing = true,
                                 processingStatus = "Starting...",
-                                progressPercentage = 0
+                                progressPercentage = 0,
+                                flashcardsValid = 0,
+                                flashcardsRejected = 0,
+                                duplicatesFound = 0
                             )
                         }
                     }
@@ -92,6 +95,15 @@ class AddMaterialViewModel @Inject constructor(
                         }
                     }
 
+                    is MaterialProcessingProgress.ExtractingConceptsProgress -> {
+                        _state.update {
+                            it.copy(
+                                processingStatus = "Analyzing content... ${progress.percent}%",
+                                progressPercentage = 40 + (progress.percent * 0.2).toInt()
+                            )
+                        }
+                    }
+
                     is MaterialProcessingProgress.ConceptsExtracted -> {
                         _state.update {
                             it.copy(
@@ -102,7 +114,7 @@ class AddMaterialViewModel @Inject constructor(
                     }
 
                     is MaterialProcessingProgress.GeneratingFlashcards -> {
-                        val percentage = 60 + ((progress.current.toFloat() / progress.total) * 30).toInt()
+                        val percentage = 60 + ((progress.current.toFloat() / progress.total) * 10).toInt()
                         _state.update {
                             it.copy(
                                 processingStatus = "Generating flashcards ${progress.current}/${progress.total}...",
@@ -111,14 +123,58 @@ class AddMaterialViewModel @Inject constructor(
                         }
                     }
 
-                    is MaterialProcessingProgress.Complete -> {
+                    is MaterialProcessingProgress.ValidatingFlashcards -> {
+                        val percentage = 70 + ((progress.current.toFloat() / progress.total) * 10).toInt()
                         _state.update {
                             it.copy(
-                                isProcessing = false,
+                                processingStatus = "Validating flashcards ${progress.current}/${progress.total}...",
+                                progressPercentage = percentage
+                            )
+                        }
+                    }
+
+                    is MaterialProcessingProgress.ValidationProgress -> {
+                        val percentage = 70 + ((progress.current.toFloat() / progress.total) * 15).toInt()
+                        _state.update {
+                            it.copy(
+                                processingStatus = "Quality check: ✅ ${progress.valid} valid, ❌ ${progress.rejected} rejected",
+                                progressPercentage = percentage,
+                                flashcardsValid = progress.valid,
+                                flashcardsRejected = progress.rejected
+                            )
+                        }
+                    }
+
+                    is MaterialProcessingProgress.RetryingGeneration -> {
+                        _state.update {
+                            it.copy(
+                                processingStatus = "Improving \"${progress.conceptName}\"… (attempt ${progress.attemptNumber})"
+                            )
+                        }
+                    }
+
+                    is MaterialProcessingProgress.DeduplicatingCards -> {
+                        _state.update {
+                            it.copy(
+                                processingStatus = "Checking for duplicates...",
+                                progressPercentage = 88
+                            )
+                        }
+                    }
+
+                    is MaterialProcessingProgress.ProcessingSummary -> {
+                        _state.update {
+                            it.copy(
+                                // Keep isProcessing = true so ProcessingStateExpressive stays visible,
+                                // showing the quality breakdown. AddMaterialScreen's LaunchedEffect
+                                // on successMessage navigates back after a short delay.
+                                isProcessing = true,
                                 processingStatus = null,
                                 progressPercentage = 100,
-                                successMessage = "✅ Created ${progress.conceptsCreated} concepts " +
-                                        "and ${progress.flashcardsCreated} flashcards!",
+                                flashcardsValid = progress.flashcardsValid,
+                                flashcardsRejected = progress.flashcardsRejected,
+                                duplicatesFound = progress.duplicatesFound,
+                                successMessage = buildSummaryMessage(progress),
                                 error = null
                             )
                         }
@@ -134,21 +190,17 @@ class AddMaterialViewModel @Inject constructor(
                             )
                         }
                     }
-
-                    is MaterialProcessingProgress.ExtractingConceptsProgress -> {
-                        _state.update {
-                            it.copy(
-                                processingStatus = "Analyzing content... ${progress.percent}%",
-                                progressPercentage = 40 + (progress.percent * 0.2).toInt()
-                            )
-                        }
-                    }
                 }
             }
         }
     }
+
+    private fun buildSummaryMessage(summary: MaterialProcessingProgress.ProcessingSummary): String {
+        val parts = buildList {
+            add("✅ ${summary.flashcardsValid} flashcards created")
+            if (summary.flashcardsRejected > 0) add("❌ ${summary.flashcardsRejected} rejected")
+            if (summary.duplicatesFound > 0) add("⚠️ ${summary.duplicatesFound} duplicates found")
+        }
+        return parts.joinToString(", ")
+    }
 }
-
-
-
-
