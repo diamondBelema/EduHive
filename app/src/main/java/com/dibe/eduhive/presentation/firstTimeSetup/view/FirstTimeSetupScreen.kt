@@ -200,13 +200,12 @@ fun SetupModelCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Column() {
                     if (isRecommended) {
                         Spacer(Modifier.width(12.dp))
                         Surface(color = MaterialTheme.colorScheme.primary, shape = CircleShape) {
                             Text(
-                                "RECOMMENDED", 
+                                "RECOMMENDED",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
@@ -214,6 +213,8 @@ fun SetupModelCard(
                             )
                         }
                     }
+                    Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+
                 }
                 Text(description, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
