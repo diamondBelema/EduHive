@@ -58,9 +58,10 @@ class AIModelManager @Inject constructor(
         val runtime = Runtime.getRuntime()
         val maxMemoryMB = runtime.maxMemory() / (1024 * 1024)
 
+        // Assign the best model to the most powerful devices.
         return when {
-            maxMemoryMB > 4000 -> getModelInfo(MODEL_GEMMA3_270M)
-            maxMemoryMB > 2000 -> getModelInfo(MODEL_QWEN)
+            maxMemoryMB > 4000 -> getModelInfo(MODEL_QWEN)
+            maxMemoryMB > 2000 -> getModelInfo(MODEL_GEMMA3_270M)
             else -> getModelInfo(MODEL_SMOLLM_135M)
         }
     }
@@ -127,7 +128,7 @@ class AIModelManager @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    suspend fun loadModel(modelId: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun loadModel(modelId: String, config: GenerationConfig = GenerationConfig()): Result<Unit> = withContext(Dispatchers.IO) {
         inferenceMutex.withLock {
             try {
                 val modelFile = getModelFile(modelId)
@@ -135,10 +136,13 @@ class AIModelManager @Inject constructor(
 
                 llmInference?.close()
 
+
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelFile.absolutePath)
-                    .setMaxTokens(MAX_CONTEXT_TOKENS)
-                    .setMaxTopK(40)
+                    .setMaxTokens(config.maxTokens)
+                    .setMaxTopK(config.topK)
+                    .setTemperature(config.temperature)
+                    .setRandomSeed(config.randomSeed)
                     .build()
 
                 llmInference = LlmInference.createFromOptions(context, options)
@@ -185,20 +189,17 @@ class AIModelManager @Inject constructor(
             return@flow
         }
 
-        val chunks = prompt.chunked(MAX_INPUT_CHARS)
-        val totalChunks = chunks.size
-        val fullResponse = StringBuilder()
+        // Never chunk structured prompts — truncate at a word boundary to preserve context.
+        val safePrompt = if (prompt.length > MAX_INPUT_CHARS) {
+            prompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
+        } else prompt
 
         try {
-            chunks.forEachIndexed { index, chunk ->
-                val response = inferenceMutex.withLock {
-                    inference.generateResponse(chunk)
-                }
-                fullResponse.append(response).append("\n")
-                emit(GenerationResult.Progress(index, totalChunks, index + 1, response))
-                delay(50)
+            val response = inferenceMutex.withLock {
+                inference.generateResponse(safePrompt)
             }
-            emit(GenerationResult.Success(fullResponse.toString().trim(), totalChunks, totalChunks))
+            emit(GenerationResult.Progress(0, 1, 1, response))
+            emit(GenerationResult.Success(response.trim(), 1, 1))
         } catch (e: Exception) {
             emit(GenerationResult.Error(e))
         }

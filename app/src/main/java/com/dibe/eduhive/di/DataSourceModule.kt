@@ -5,6 +5,7 @@ import android.content.Context
 import com.dibe.eduhive.data.local.dao.*
 import com.dibe.eduhive.data.source.ai.AIDataSource
 import com.dibe.eduhive.data.source.ai.AIModelManager
+import com.dibe.eduhive.data.source.ai.FlashcardValidator
 import com.dibe.eduhive.data.source.ai.ModelPreferences
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.data.source.local.ConceptLocalDataSource
@@ -54,11 +55,15 @@ object DataSourceModule {
 
     // AI  ❗ FIXED BUG HERE
     @Provides @Singleton
+    fun provideFlashcardValidator(): FlashcardValidator = FlashcardValidator()
+
+    @Provides @Singleton
     fun provideAIDataSource(
         modelManager: AIModelManager,
-        modelPreferences: ModelPreferences
+        modelPreferences: ModelPreferences,
+        flashcardValidator: FlashcardValidator
     ): AIDataSource =
-        AIDataSource(modelManager, modelPreferences)
+        AIDataSource(modelManager, modelPreferences, flashcardValidator)
 
     @Provides @Singleton
     fun provideAIModelManager(
