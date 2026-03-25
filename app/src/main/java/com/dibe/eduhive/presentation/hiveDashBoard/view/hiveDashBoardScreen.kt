@@ -34,13 +34,14 @@ import com.dibe.eduhive.presentation.hiveDashBoard.viewmodel.HiveDashboardViewMo
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HiveDashboardScreen(
-    hiveId: String,                                    // ← add this
+    hiveId: String,
     viewModel: HiveDashboardViewModel = hiltViewModel(),
     onNavigateToStudy: () -> Unit,
     onNavigateToAddMaterial: () -> Unit,
     onNavigateToConcepts: () -> Unit,
     onNavigateToReviews: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToMaterials: () -> Unit, // Add this
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -150,7 +151,8 @@ fun HiveDashboardScreen(
                                 totalMaterials = overview.totalMaterials,
                                 recentReviews = overview.recentReviewsCount,
                                 onConceptsClick = onNavigateToConcepts,
-                                onReviewsClick = onNavigateToReviews
+                                onReviewsClick = onNavigateToReviews,
+                                onMaterialsClick = onNavigateToMaterials // Add this
                             )
                         }
                     }
@@ -380,7 +382,8 @@ fun MetricsGrid(
     totalMaterials: Int,
     recentReviews: Int,
     onConceptsClick: () -> Unit,
-    onReviewsClick: () -> Unit
+    onReviewsClick: () -> Unit,
+    onMaterialsClick: () -> Unit // Add this
 ) {
     Row(
         modifier = Modifier
@@ -394,7 +397,12 @@ fun MetricsGrid(
             icon = Icons.Default.Book, 
             modifier = Modifier.weight(1f).clickable(onClick = onConceptsClick)
         )
-        MetricSmallCard("Docs", totalMaterials.toString(), Icons.Default.Description, Modifier.weight(1f))
+        MetricSmallCard(
+            label = "Docs", 
+            value = totalMaterials.toString(), 
+            icon = Icons.Default.Description, 
+            modifier = Modifier.weight(1f).clickable(onClick = onMaterialsClick) // Add this
+        )
         MetricSmallCard(
             label = "Reviews", 
             value = recentReviews.toString(), 
