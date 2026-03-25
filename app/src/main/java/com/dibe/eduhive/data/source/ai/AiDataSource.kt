@@ -47,11 +47,10 @@ class AIDataSource @Inject constructor(
             val result = modelManager.generate(prompt)
 
             result.onSuccess { response ->
-                val pageConcepts = parseConceptsFast(response)
+                val pageConcepts = parseConceptsRobust(response)
                 allExtractedConcepts.addAll(pageConcepts)
             }.onFailure {
-                // 🔴 OLD: silently continues with dead session
-                // ✅ NEW: reinitialize before next page
+                // reinitialize before next page if native engine failed
                 modelManager.unloadModel()
                 delay(300)
                 ensureModelLoaded()
@@ -60,7 +59,11 @@ class AIDataSource @Inject constructor(
 
         // Deduplicate and finish
         val uniqueConcepts = deduplicateConcepts(allExtractedConcepts)
-        send(ConceptExtractionState.Success(uniqueConcepts))
+        if (uniqueConcepts.isEmpty()) {
+            send(ConceptExtractionState.Error("No concepts could be identified from the material. Try a different section or check file quality."))
+        } else {
+            send(ConceptExtractionState.Success(uniqueConcepts))
+        }
     }.flowOn(Dispatchers.IO)
 
     /**
@@ -85,7 +88,7 @@ class AIDataSource @Inject constructor(
 
             val prompt = buildConceptExtractionPrompt(text, hiveContext)
             val response = modelManager.generate(prompt).getOrThrow()
-            Result.success(parseConceptsFast(response))
+            Result.success(parseConceptsRobust(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -108,15 +111,8 @@ class AIDataSource @Inject constructor(
                 operation = { page -> buildConceptExtractionPrompt(page, hiveContext) }
             )
 
-
             val allConcepts = pageResults.flatMap {
-                Log.d("AIDebug", "Raw response: $it") // ADD THIS
-
-                val pageConcepts = parseConceptsFast(it)
-
-                Log.d("AIDebug", "Parsed concepts: ${pageConcepts.size}") // AND THIS
-
-                pageConcepts
+                parseConceptsRobust(it)
             }
             Result.success(deduplicateConcepts(allConcepts))
         } catch (e: Exception) {
@@ -143,9 +139,7 @@ class AIDataSource @Inject constructor(
         val result = modelManager.generate(prompt)
 
         result.onSuccess { response ->
-            Log.d("AIDebug", "Raw response: $response") // ADD THIS
-
-            send(FlashcardGenerationState.Success(parseFlashcardsFast(response)))
+            send(FlashcardGenerationState.Success(parseFlashcardsRobust(response)))
         }.onFailure { e ->
             send(FlashcardGenerationState.Error(e.message ?: "Failed to generate flashcards"))
         }
@@ -165,7 +159,7 @@ class AIDataSource @Inject constructor(
             }
             val prompt = buildFlashcardPrompt(conceptName, conceptDescription, count)
             val response = modelManager.generate(prompt).getOrThrow()
-            Result.success(parseFlashcardsFast(response))
+            Result.success(parseFlashcardsRobust(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -237,39 +231,35 @@ class AIDataSource @Inject constructor(
     }
 
     private fun buildConceptExtractionPrompt(text: String, context: String): String {
-        val templateOverhead = 150 // chars used by the template itself
+        val templateOverhead = 200
         val maxTextChars = AIModelManager.MAX_INPUT_CHARS - templateOverhead
 
-        // Truncate at word boundary before injecting into prompt
         val safeText = if (text.length > maxTextChars) {
             text.take(maxTextChars).substringBeforeLast(' ')
         } else text
 
         return """
-        Extract 3-10 key concepts from this educational material.
-        ${if (context.isNotEmpty()) "Context: $context\n" else ""}
-        Material:
+        Extract important educational concepts from the following text.
+        ${if (context.isNotEmpty()) "Goal: $context\n" else ""}
+        Text:
         $safeText
         
-        For each concept, provide:
-        1. Name (2-5 words)
-        2. Description (1-2 sentences)
+        Output format:
+        CONCEPT: [Simple Name]
+        DESCRIPTION: [Clear Explanation]
         
-        Format EXACTLY like this:
-        CONCEPT: [Name]
-        DESCRIPTION: [Description]
+        Provide 3 to 8 concepts.
     """.trimIndent()
     }
 
     private fun buildFlashcardPrompt(name: String, description: String, count: Int): String {
         return """
-            Create $count flashcards about: $name
-            Description: $description
+            Create $count flashcards for: $name
+            Information: $description
             
-            Format EXACTLY like this:
-            FLASHCARD 1
-            FRONT: [Question]
-            BACK: [Answer]
+            Format:
+            FRONT: [Short Question]
+            BACK: [Concise Answer]
         """.trimIndent()
     }
 
@@ -278,61 +268,54 @@ class AIDataSource @Inject constructor(
             Create $count quiz questions about: $name
             Description: $description
             
-            Include a mix of:
-            - Multiple Choice (MCQ)
-            - True/False
+            Types: MCQ or TRUE_FALSE.
             
-            Format EXACTLY like this:
-            
+            Format:
             QUESTION 1
             TYPE: MCQ
-            TEXT: [Question Text]
-            OPTION A: [Option A]
-            OPTION B: [Option B]
-            OPTION C: [Option C]
-            OPTION D: [Option D]
+            TEXT: [Question]
+            OPTION A: [Option]
+            OPTION B: [Option]
+            OPTION C: [Option]
+            OPTION D: [Option]
             CORRECT: A
-            
-            QUESTION 2
-            TYPE: TRUE_FALSE
-            TEXT: [Question Text]
-            CORRECT: TRUE
-            
-            Create all $count questions now.
         """.trimIndent()
     }
 
-    private fun parseConceptsFast(response: String): List<ExtractedConcept> {
+    private fun parseConceptsRobust(response: String): List<ExtractedConcept> {
         val concepts = mutableListOf<ExtractedConcept>()
         val lines = response.lines()
         var currentName: String? = null
 
         for (line in lines) {
-            val trimmed = line.trim()
-            if (trimmed.startsWith("CONCEPT:", ignoreCase = true)) {
-                currentName = trimmed.substringAfter(":").trim()
-            } else if (trimmed.startsWith("DESCRIPTION:", ignoreCase = true) && currentName != null) {
-                val description = trimmed.substringAfter(":").trim()
-                concepts.add(ExtractedConcept(currentName, description))
+            val cleanLine = line.replace("*", "").trim()
+            if (cleanLine.startsWith("CONCEPT:", ignoreCase = true)) {
+                currentName = cleanLine.substringAfter(":").trim().removePrefix("[").removeSuffix("]")
+            } else if (cleanLine.startsWith("DESCRIPTION:", ignoreCase = true) && currentName != null) {
+                val description = cleanLine.substringAfter(":").trim().removePrefix("[").removeSuffix("]")
+                if (currentName.isNotBlank() && description.isNotEmpty()) {
+                    concepts.add(ExtractedConcept(currentName, description))
+                }
                 currentName = null
             }
         }
-
         return concepts
     }
 
-    private fun parseFlashcardsFast(response: String): List<GeneratedFlashcard> {
+    private fun parseFlashcardsRobust(response: String): List<GeneratedFlashcard> {
         val flashcards = mutableListOf<GeneratedFlashcard>()
         val lines = response.lines()
         var currentFront: String? = null
 
         for (line in lines) {
-            val trimmed = line.trim()
-            if (trimmed.startsWith("FRONT:", ignoreCase = true)) {
-                currentFront = trimmed.substringAfter(":").trim()
-            } else if (trimmed.startsWith("BACK:", ignoreCase = true) && currentFront != null) {
-                val back = trimmed.substringAfter(":").trim()
-                flashcards.add(GeneratedFlashcard(currentFront, back))
+            val cleanLine = line.replace("*", "").trim()
+            if (cleanLine.startsWith("FRONT:", ignoreCase = true)) {
+                currentFront = cleanLine.substringAfter(":").trim().removePrefix("[").removeSuffix("]")
+            } else if (cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null) {
+                val back = cleanLine.substringAfter(":").trim().removePrefix("[").removeSuffix("]")
+                if (currentFront.isNotBlank() && back.isNotEmpty()) {
+                    flashcards.add(GeneratedFlashcard(currentFront, back))
+                }
                 currentFront = null
             }
         }
@@ -353,15 +336,15 @@ class AIDataSource @Inject constructor(
             var correct = ""
 
             for (line in lines) {
-                val trimmed = line.trim()
+                val trimmed = line.replace("*", "").trim()
                 when {
-                    trimmed.startsWith("TYPE:", ignoreCase = true) -> type = trimmed.substring(5).trim()
-                    trimmed.startsWith("TEXT:", ignoreCase = true) -> text = trimmed.substring(5).trim()
+                    trimmed.startsWith("TYPE:", ignoreCase = true) -> type = trimmed.substringAfter(":").trim()
+                    trimmed.startsWith("TEXT:", ignoreCase = true) -> text = trimmed.substringAfter(":").trim()
                     trimmed.startsWith("OPTION", ignoreCase = true) -> {
                         val optionText = trimmed.substringAfter(":", "").trim()
                         if (optionText.isNotEmpty()) options.add(optionText)
                     }
-                    trimmed.startsWith("CORRECT:", ignoreCase = true) -> correct = trimmed.substring(8).trim()
+                    trimmed.startsWith("CORRECT:", ignoreCase = true) -> correct = trimmed.substringAfter(":").trim()
                 }
             }
 

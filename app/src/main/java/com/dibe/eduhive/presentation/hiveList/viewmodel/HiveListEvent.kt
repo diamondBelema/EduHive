@@ -6,6 +6,9 @@ sealed class HiveListEvent {
     object LoadHives : HiveListEvent()
     data class CreateHive(val name: String, val description: String?) : HiveListEvent()
     data class SelectHive(val hiveId: String) : HiveListEvent()
+    // In HiveListEvent
+    object ClearSelectedHive : HiveListEvent()
+
     object ShowCreateDialog : HiveListEvent()
     object HideCreateDialog : HiveListEvent()
     object ClearError : HiveListEvent()

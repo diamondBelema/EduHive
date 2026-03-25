@@ -36,6 +36,10 @@ class HiveListViewModel @Inject constructor(
             is HiveListEvent.ShowCreateDialog -> {
                 _state.update { it.copy(showCreateDialog = true) }
             }
+            // In HiveListViewModel, in the when(event) block:
+            is HiveListEvent.ClearSelectedHive -> {
+                _state.update { it.copy(selectedHiveId = null) }
+            }
             is HiveListEvent.HideCreateDialog -> {
                 _state.update { it.copy(showCreateDialog = false) }
             }

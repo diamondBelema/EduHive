@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.*
@@ -19,7 +20,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -34,9 +34,13 @@ import com.dibe.eduhive.presentation.hiveDashBoard.viewmodel.HiveDashboardViewMo
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HiveDashboardScreen(
+    hiveId: String,                                    // ← add this
     viewModel: HiveDashboardViewModel = hiltViewModel(),
     onNavigateToStudy: () -> Unit,
     onNavigateToAddMaterial: () -> Unit,
+    onNavigateToConcepts: () -> Unit,
+    onNavigateToReviews: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -59,8 +63,8 @@ fun HiveDashboardScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* Settings or Info */ }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More")
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -131,7 +135,10 @@ fun HiveDashboardScreen(
                                 SectionHeader(title = "Focus Areas", icon = Icons.Default.Warning, color = MaterialTheme.colorScheme.error)
                             }
                             items(overview.weakConcepts.take(3)) { concept ->
-                                ConceptFocusCard(concept = concept)
+                                ConceptFocusCard(
+                                    concept = concept,
+                                    onClick = onNavigateToConcepts
+                                )
                             }
                         }
 
@@ -141,7 +148,9 @@ fun HiveDashboardScreen(
                             MetricsGrid(
                                 totalConcepts = overview.totalConcepts,
                                 totalMaterials = overview.totalMaterials,
-                                recentReviews = overview.recentReviewsCount
+                                recentReviews = overview.recentReviewsCount,
+                                onConceptsClick = onNavigateToConcepts,
+                                onReviewsClick = onNavigateToReviews
                             )
                         }
                     }
@@ -198,13 +207,13 @@ fun DashboardHeader(confidence: Float, dueCount: Int) {
                 // Visual Progress Circle
                 Box(contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
-                        progress = 1f,
+                        progress = { 1f },
                         modifier = Modifier.size(80.dp),
                         color = MaterialTheme.colorScheme.outlineVariant,
                         strokeWidth = 8.dp
                     )
                     CircularProgressIndicator(
-                        progress = confidence,
+                        progress = { confidence },
                         modifier = Modifier.size(80.dp),
                         strokeWidth = 8.dp,
                         strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
@@ -221,7 +230,7 @@ fun DashboardHeader(confidence: Float, dueCount: Int) {
             
             // Modern progress indicator
             LinearProgressIndicator(
-                progress = confidence,
+                progress = { confidence },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp)
@@ -302,11 +311,12 @@ fun ActionCardExpressive(
 }
 
 @Composable
-fun ConceptFocusCard(concept: Concept) {
+fun ConceptFocusCard(concept: Concept, onClick: () -> Unit) {
     ElevatedCard(
         modifier = Modifier
             .padding(horizontal = 16.dp)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -319,12 +329,11 @@ fun ConceptFocusCard(concept: Concept) {
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .clickable { /* Re-generate or explain */ },
+                    .clip(MaterialTheme.shapes.medium),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
-                    progress = concept.confidence.toFloat(),
+                    progress = { concept.confidence.toFloat() },
                     modifier = Modifier.fillMaxSize(),
                     color = if (concept.confidence < 0.4) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -356,13 +365,11 @@ fun ConceptFocusCard(concept: Concept) {
                 )
             }
             
-            IconButton(onClick = { /* Jump to concept study */ }) {
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.outline
-                )
-            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline
+            )
         }
     }
 }
@@ -371,7 +378,9 @@ fun ConceptFocusCard(concept: Concept) {
 fun MetricsGrid(
     totalConcepts: Int,
     totalMaterials: Int,
-    recentReviews: Int
+    recentReviews: Int,
+    onConceptsClick: () -> Unit,
+    onReviewsClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -379,9 +388,19 @@ fun MetricsGrid(
             .fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        MetricSmallCard("Concepts", totalConcepts.toString(), Icons.Default.Book, Modifier.weight(1f))
+        MetricSmallCard(
+            label = "Concepts", 
+            value = totalConcepts.toString(), 
+            icon = Icons.Default.Book, 
+            modifier = Modifier.weight(1f).clickable(onClick = onConceptsClick)
+        )
         MetricSmallCard("Docs", totalMaterials.toString(), Icons.Default.Description, Modifier.weight(1f))
-        MetricSmallCard("Reviews", recentReviews.toString(), Icons.Outlined.History, Modifier.weight(1f))
+        MetricSmallCard(
+            label = "Reviews", 
+            value = recentReviews.toString(), 
+            icon = Icons.Outlined.History, 
+            modifier = Modifier.weight(1f).clickable(onClick = onReviewsClick)
+        )
     }
 }
 

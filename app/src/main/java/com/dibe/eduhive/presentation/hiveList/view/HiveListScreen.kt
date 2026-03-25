@@ -40,10 +40,10 @@ fun HiveListScreen(
         derivedStateOf { listState.firstVisibleItemIndex == 0 }
     }
 
-    // Handle navigation
     LaunchedEffect(state.selectedHiveId) {
         state.selectedHiveId?.let { hiveId ->
             onHiveSelected(hiveId)
+            viewModel.onEvent(HiveListEvent.ClearSelectedHive) // clear after consuming
         }
     }
 

@@ -1,25 +1,32 @@
 package com.dibe.eduhive.presentation.firstTimeSetup.view
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.dibe.eduhive.data.source.ai.ModelInfo
 import com.dibe.eduhive.presentation.firstTimeSetup.viewmodel.FirstTimeSetupEvent
 import com.dibe.eduhive.presentation.firstTimeSetup.viewmodel.FirstTimeSetupViewModel
 import com.dibe.eduhive.presentation.firstTimeSetup.viewmodel.SetupStep
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FirstTimeSetupScreen(
     viewModel: FirstTimeSetupViewModel = hiltViewModel(),
@@ -27,60 +34,49 @@ fun FirstTimeSetupScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
-    // Navigate away when complete
     LaunchedEffect(state.isComplete) {
-        if (state.isComplete) {
-            onSetupComplete()
-        }
+        if (state.isComplete) onSetupComplete()
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        when (state.currentStep) {
-            SetupStep.WELCOME -> WelcomeStep(
-                onStart = { viewModel.onEvent(FirstTimeSetupEvent.StartSetup) },
-                onSkip = { viewModel.onEvent(FirstTimeSetupEvent.SkipSetup) }
-            )
-
-            SetupStep.MODEL_SELECTION -> ModelSelectionStep(
-                availableModels = state.availableModels,
-                selectedModel = state.selectedModel,
-                recommendedModel = state.recommendedModel,
-                onModelSelect = { modelId ->
-                    viewModel.onEvent(FirstTimeSetupEvent.SelectModel(modelId))
-                },
-                onDownload = {
-                    state.selectedModel?.let { model ->
-                        viewModel.onEvent(FirstTimeSetupEvent.DownloadModel(model.id))
-                    }
-                },
-                onSkip = { viewModel.onEvent(FirstTimeSetupEvent.SkipSetup) }
-            )
-
-            SetupStep.DOWNLOADING -> DownloadingStep(
-                modelName = state.selectedModel?.name ?: "",
-                progress = state.downloadProgress,
-                status = state.downloadStatus,
-                downloadedMB = state.downloadedBytes / (1024f * 1024f),
-                totalMB = state.totalBytes / (1024f * 1024f),
-                error = state.error,
-                onRetry = { viewModel.onEvent(FirstTimeSetupEvent.RetryDownload) }
-            )
-
-            SetupStep.COMPLETE -> CompleteStep(
-                onContinue = { viewModel.onEvent(FirstTimeSetupEvent.CompleteSetup) }
-            )
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface
+    ) { padding ->
+        AnimatedContent(
+            targetState = state.currentStep,
+            transitionSpec = {
+                fadeIn(tween(600)) + slideInHorizontally { it / 2 } togetherWith
+                fadeOut(tween(400)) + slideOutHorizontally { -it / 2 }
+            },
+            label = "setup_step_transition"
+        ) { step ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                when (step) {
+                    SetupStep.WELCOME -> WelcomeStep(onStart = { viewModel.onEvent(FirstTimeSetupEvent.StartSetup) })
+                    SetupStep.MODEL_SELECTION -> ModelSelectionStep(
+                        availableModels = state.availableModels,
+                        selectedModelId = state.selectedModel?.id,
+                        onSelect = { viewModel.onEvent(FirstTimeSetupEvent.SelectModel(it)) },
+                        onConfirm = { state.selectedModel?.let { viewModel.onEvent(FirstTimeSetupEvent.DownloadModel(it.id)) } }
+                    )
+                    SetupStep.DOWNLOADING -> DownloadingStep(
+                        progress = state.downloadProgress,
+                        status = state.downloadStatus,
+                        error = state.error,
+                        onRetry = { viewModel.onEvent(FirstTimeSetupEvent.RetryDownload) }
+                    )
+                    SetupStep.COMPLETE -> FinalStep(onFinish = { viewModel.onEvent(FirstTimeSetupEvent.CompleteSetup) })
+                }
+            }
         }
     }
 }
 
 @Composable
-fun WelcomeStep(
-    onStart: () -> Unit,
-    onSkip: () -> Unit
-) {
+fun WelcomeStep(onStart: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,198 +84,150 @@ fun WelcomeStep(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        Surface(
+            modifier = Modifier.size(120.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Hive, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(48.dp))
+        
         Text(
-            text = "🐝",
-            style = MaterialTheme.typography.displayLarge
+            "Build your Knowledge Hive",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+            lineHeight = 44.sp
         )
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Welcome to EduHive!",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
-        )
+        
         Spacer(modifier = Modifier.height(16.dp))
+        
         Text(
-            text = "To get started, we need to download an AI model for offline learning.",
+            "EduHive uses powerful on-device AI to turn your documents and notes into interactive study aids.",
             style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "This is a one-time setup and happens on your device.",
-            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(48.dp))
+        
+        Spacer(modifier = Modifier.height(64.dp))
+        
         Button(
             onClick = onStart,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            shape = MaterialTheme.shapes.extraLarge
         ) {
-            Icon(Icons.Default.Download, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Get Started")
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        TextButton(onClick = onSkip) {
-            Text("Skip for now")
+            Text("Get Started", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.width(12.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null)
         }
     }
 }
 
 @Composable
 fun ModelSelectionStep(
-    availableModels: List<ModelInfo>,
-    selectedModel: ModelInfo?,
-    recommendedModel: ModelInfo?,
-    onModelSelect: (String) -> Unit,
-    onDownload: () -> Unit,
-    onSkip: () -> Unit
+    availableModels: List<com.dibe.eduhive.data.source.ai.ModelInfo>,
+    selectedModelId: String?,
+    onSelect: (String) -> Unit,
+    onConfirm: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Text(
-            text = "Choose AI Model",
+            "Choose your AI engine",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
-        Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Select the model that fits your device",
+            "Select the model that best fits your device performance.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(24.dp))
-
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            items(availableModels) { model ->
-                ModelCard(
-                    model = model,
-                    isSelected = model.id == selectedModel?.id,
-                    isRecommended = model.id == recommendedModel?.id,
-                    onSelect = { onModelSelect(model.id) }
-                )
-            }
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        availableModels.forEach { model ->
+            SetupModelCard(
+                name = model.name,
+                description = model.description,
+                size = "${(model.sizeBytes / 1024 / 1024)} MB",
+                isSelected = model.id == selectedModelId,
+                isRecommended = model.recommended,
+                onSelect = { onSelect(model.id) }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
+        
+        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(32.dp))
+        
         Button(
-            onClick = onDownload,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = selectedModel != null
+            onClick = onConfirm,
+            enabled = selectedModelId != null,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            shape = MaterialTheme.shapes.extraLarge
         ) {
-            Icon(Icons.Default.Download, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Download ${selectedModel?.sizeMB?.toInt() ?: 0}MB")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        TextButton(
-            onClick = onSkip,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Skip for now")
+            Text("Initialize Engine", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
 
 @Composable
-fun ModelCard(
-    model: ModelInfo,
+fun SetupModelCard(
+    name: String,
+    description: String,
+    size: String,
     isSelected: Boolean,
     isRecommended: Boolean,
     onSelect: () -> Unit
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(
-                selected = isSelected,
-                onClick = onSelect
-            ),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surface
-        )
+    Surface(
+        onClick = onSelect,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+        border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.padding(24.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = model.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     if (isRecommended) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = MaterialTheme.shapes.small
-                        ) {
+                        Spacer(Modifier.width(12.dp))
+                        Surface(color = MaterialTheme.colorScheme.primary, shape = CircleShape) {
                             Text(
-                                text = "RECOMMENDED",
+                                "RECOMMENDED", 
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = model.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row {
-                    Text(
-                        text = "${model.sizeMB.toInt()}MB",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "${model.tokensPerSecond} tokens/sec",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(description, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(size, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
-
-            if (isSelected) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = "Selected",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
+            RadioButton(selected = isSelected, onClick = onSelect)
         }
     }
 }
 
 @Composable
 fun DownloadingStep(
-    modelName: String,
     progress: Float,
     status: String,
-    downloadedMB: Float,
-    totalMB: Float,
     error: String?,
     onRetry: () -> Unit
 ) {
@@ -290,78 +238,57 @@ fun DownloadingStep(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        Box(contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { 1f },
+                modifier = Modifier.size(200.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                strokeWidth = 12.dp,
+                strokeCap = StrokeCap.Round
+            )
+            CircularProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.size(200.dp),
+                strokeWidth = 16.dp,
+                strokeCap = StrokeCap.Round
+            )
+            Text(
+                "${(progress * 100).toInt()}%",
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Black
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(48.dp))
+        
+        Text(
+            if (error != null) "Initialization Failed" else "Configuring Engine",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        Text(
+            error ?: status,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        
         if (error != null) {
-            Text(
-                text = "❌",
-                style = MaterialTheme.typography.displayLarge
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "Download Failed",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = error,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center
-            )
             Spacer(modifier = Modifier.height(32.dp))
-            Button(
-                onClick = onRetry,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = onRetry, shape = MaterialTheme.shapes.large) {
+                Icon(Icons.Rounded.Refresh, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
                 Text("Retry Download")
-            }
-        } else {
-            Text(
-                text = "⬇️",
-                style = MaterialTheme.typography.displayLarge
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "Downloading $modelName",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(32.dp))
-
-            LinearProgressIndicator(
-                progress = progress,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "${(progress * 100).toInt()}%",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = status,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (totalMB > 0) {
-                Text(
-                    text = "${downloadedMB.toInt()}MB / ${totalMB.toInt()}MB",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
 }
 
 @Composable
-fun CompleteStep(
-    onContinue: () -> Unit
-) {
+fun FinalStep(onFinish: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -369,28 +296,41 @@ fun CompleteStep(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(
-            text = "✅",
-            style = MaterialTheme.typography.displayLarge
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Setup Complete!",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Your AI model is ready. You can now use EduHive offline!",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(48.dp))
-        Button(
-            onClick = onContinue,
-            modifier = Modifier.fillMaxWidth()
+        Surface(
+            modifier = Modifier.size(140.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer
         ) {
-            Text("Start Learning")
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(48.dp))
+        
+        Text(
+            "Hive logic initialized",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            "Your local AI engine is ready. Everything you process stays on your device.",
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        
+        Spacer(modifier = Modifier.height(64.dp))
+        
+        Button(
+            onClick = onFinish,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            shape = MaterialTheme.shapes.extraLarge
+        ) {
+            Text("Enter the Hive", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
