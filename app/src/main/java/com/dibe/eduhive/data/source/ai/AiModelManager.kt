@@ -136,6 +136,7 @@ class AIModelManager @Inject constructor(
 
                 llmInference?.close()
 
+
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelFile.absolutePath)
                     .setMaxTokens(config.maxTokens)
