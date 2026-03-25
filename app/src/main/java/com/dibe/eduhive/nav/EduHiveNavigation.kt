@@ -87,6 +87,7 @@ fun EduHiveNavigation(
             )
         }
 
+
         composable(Screen.Settings.route) {
             SettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
