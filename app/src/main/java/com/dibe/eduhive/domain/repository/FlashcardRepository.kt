@@ -53,5 +53,19 @@ interface FlashcardRepository {
         count: Int
     ): Flow<FlashcardGenerationProgress>
 
+    /**
+     * Generate flashcards for a batch of concepts in a single AI request.
+     *
+     * Grouping 3–5 concepts per call improves global context, reduces duplicate
+     * questions, and produces more diverse flashcards.
+     *
+     * @param concepts List of (conceptId, conceptName, conceptDescription) triples.
+     * @param countPerConcept Desired number of flashcards per concept.
+     */
+    suspend fun generateFlashcardsForConceptsBatch(
+        concepts: List<Triple<String, String, String?>>,
+        countPerConcept: Int = 5
+    ): List<Flashcard>
+
     suspend fun deleteFlashcard(flashcardId: String)
 }
