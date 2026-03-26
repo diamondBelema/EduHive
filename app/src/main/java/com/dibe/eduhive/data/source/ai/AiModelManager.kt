@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.util.Log
 import com.dibe.eduhive.data.source.online.Downloader
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -18,7 +19,7 @@ import javax.inject.Singleton
  * AI Model Manager using MediaPipe LLM Inference.
  *
  * Handles model lifecycle and provides a safe interface for text generation
- * that avoids native crashes by chunking large inputs.
+ * that avoids native crashes and context instability.
  */
 @Singleton
 class AIModelManager @Inject constructor(
@@ -32,20 +33,26 @@ class AIModelManager @Inject constructor(
     companion object {
         const val TAG = "AIModelManager"
 
+        const val MODEL_GEMMA3_1B = "gemma3-1b"
         const val MODEL_GEMMA3_270M = "gemma3-270m"
         const val MODEL_QWEN = "Qwen2.5-0.5B"
         const val MODEL_SMOLLM_135M = "SmolLM-135M"
 
+        private const val GEMMA3_1B_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-1b-it-int4.task?download=true"
         private const val QWEN_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q4_0-web.task?download=true"
 
-        // 🛡️ SAFETY LIMITS
-        private const val MAX_CONTEXT_TOKENS = 1280 // match the ekv value in your model filenames
-        const val MAX_INPUT_CHARS = 4000 // reduce accordingly (1280 tokens ≈ ~5000 chars, leave room for response)
+
+
+
+        // Input limits are enforced per-task in AiDataSource, not here.
+        // The manager accepts whatever prompt it receives.
+        const val MAX_INPUT_CHARS = Int.MAX_VALUE  // deprecated — use AiDataSource task limits
     }
 
     private var llmInference: LlmInference? = null
+    private var currentConfig: GenerationConfig = GenerationConfig()
     private val inferenceMutex = Mutex()
 
     fun hasModelReady(): Boolean {
@@ -58,8 +65,8 @@ class AIModelManager @Inject constructor(
         val runtime = Runtime.getRuntime()
         val maxMemoryMB = runtime.maxMemory() / (1024 * 1024)
 
-        // Assign the best model to the most powerful devices.
         return when {
+            maxMemoryMB > 6000 -> getModelInfo(MODEL_GEMMA3_1B)
             maxMemoryMB > 4000 -> getModelInfo(MODEL_QWEN)
             maxMemoryMB > 2000 -> getModelInfo(MODEL_GEMMA3_270M)
             else -> getModelInfo(MODEL_SMOLLM_135M)
@@ -69,8 +76,9 @@ class AIModelManager @Inject constructor(
     fun getAvailableModels(): List<ModelInfo> {
         return listOf(
             getModelInfo(MODEL_SMOLLM_135M),
+            getModelInfo(MODEL_GEMMA3_270M),
             getModelInfo(MODEL_QWEN),
-            getModelInfo(MODEL_GEMMA3_270M)
+            getModelInfo(MODEL_GEMMA3_1B)
         )
     }
 
@@ -128,27 +136,30 @@ class AIModelManager @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    /**
+     * Load model engine.
+     * Sessions are created per-request to apply config and prevent context accumulation.
+     */
     suspend fun loadModel(modelId: String, config: GenerationConfig = GenerationConfig()): Result<Unit> = withContext(Dispatchers.IO) {
         inferenceMutex.withLock {
             try {
                 val modelFile = getModelFile(modelId)
                 if (!modelFile.exists()) return@withLock Result.failure(Exception("Model file not found"))
 
+                currentConfig = config
                 llmInference?.close()
-
+                llmInference = null
 
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelFile.absolutePath)
                     .setMaxTokens(config.maxTokens)
-                    .setMaxTopK(config.topK)
-                    .setTemperature(config.temperature)
-                    .setRandomSeed(config.randomSeed)
                     .build()
 
                 llmInference = LlmInference.createFromOptions(context, options)
+
                 modelPreferences.setActiveModel(modelId)
-                
-                Log.d(TAG, "Model $modelId loaded successfully.")
+
+                Log.d(TAG, "Model $modelId engine loaded. Session-based generation enabled.")
                 Result.success(Unit)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load model", e)
@@ -157,24 +168,52 @@ class AIModelManager @Inject constructor(
         }
     }
 
+    /**
+     * Creates a new session with current configuration.
+     * A fresh session for each generation ensures stateless behavior and stability.
+     */
+    private fun createSessionInternal(): LlmInferenceSession? {
+        val engine = llmInference ?: return null
+        return try {
+            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .setTemperature(currentConfig.temperature)
+                .setTopK(currentConfig.topK)
+                .setRandomSeed(currentConfig.randomSeed)
+                .build()
+            LlmInferenceSession.createFromOptions(engine, sessionOptions)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create session", e)
+            null
+        }
+    }
+
+    /**
+     * Generate response using a fresh session to apply parameters and avoid context pollution.
+     */
     suspend fun generate(prompt: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val inference = llmInference
-                ?: return@withContext Result.failure(Exception("Model not loaded"))
+            val engine = llmInference ?: return@withContext Result.failure(Exception("AI engine not loaded"))
 
-            // Truncate at word boundary — never split into chunks
             val safePrompt = if (prompt.length > MAX_INPUT_CHARS) {
                 prompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
             } else prompt
 
             val response = inferenceMutex.withLock {
-                inference.generateResponse(safePrompt)
+                val session = createSessionInternal() ?: return@withLock "[Error: Session creation failed]"
+                session.use { session ->
+                    session.addQueryChunk(safePrompt)
+                    session.generateResponse()
+                }
             }
+
+            if (response.startsWith("[Error:")) {
+                return@withContext Result.failure(Exception(response))
+            }
+
             Result.success(response)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Generation failed, reinitializing session", e)
-            // Always reinitialize after ANY failure
+            Log.e(TAG, "Generation failed, reinitializing model", e)
             unloadModel()
             delay(500)
             val activeModel = modelPreferences.getActiveModel()
@@ -183,20 +222,26 @@ class AIModelManager @Inject constructor(
         }
     }
 
+    /**
+     * Streaming generation using a fresh session.
+     */
     fun generateStreaming(prompt: String): Flow<GenerationResult> = flow {
-        val inference = llmInference ?: run {
-            emit(GenerationResult.Error(Exception("Model not loaded")))
+        val engine = llmInference ?: run {
+            emit(GenerationResult.Error(Exception("AI engine not loaded")))
             return@flow
         }
 
-        // Never chunk structured prompts — truncate at a word boundary to preserve context.
         val safePrompt = if (prompt.length > MAX_INPUT_CHARS) {
             prompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
         } else prompt
 
         try {
             val response = inferenceMutex.withLock {
-                inference.generateResponse(safePrompt)
+                val session = createSessionInternal() ?: throw Exception("Session creation failed")
+                session.use { session ->
+                    session.addQueryChunk(safePrompt)
+                    session.generateResponse()
+                }
             }
             emit(GenerationResult.Progress(0, 1, 1, response))
             emit(GenerationResult.Success(response.trim(), 1, 1))
@@ -211,14 +256,19 @@ class AIModelManager @Inject constructor(
     ): List<String> = withContext(Dispatchers.IO) {
         pages.map { page ->
             try {
-                val inference = llmInference ?: return@map "[Error: Model not loaded]"
+                val engine = llmInference ?: return@map "[Error: Engine not loaded]"
                 val prompt = operation(page)
                 val safePrompt = if (prompt.length > MAX_INPUT_CHARS) prompt.take(MAX_INPUT_CHARS) else prompt
-                
+
                 inferenceMutex.withLock {
-                    inference.generateResponse(safePrompt)
+                    val session = createSessionInternal() ?: return@withLock "[Error: Session creation failed]"
+                    session.use { session ->
+                        session.addQueryChunk(safePrompt)
+                        session.generateResponse()
+                    }
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Batch page failed", e)
                 "[Error: ${e.message}]"
             }
         }
@@ -245,7 +295,8 @@ class AIModelManager @Inject constructor(
 
     private fun getModelInfo(modelId: String): ModelInfo {
         return when (modelId) {
-            MODEL_QWEN -> ModelInfo(MODEL_QWEN, "Qwen 2.5 0.5B", "Best quality, slower", QWEN_URL, 547_000_000L, 30, true)
+            MODEL_GEMMA3_1B -> ModelInfo(MODEL_GEMMA3_1B, "Gemma 3 1B", "Best reasoning, most intelligent", GEMMA3_1B_URL, 555_000_000L, 15, false)
+            MODEL_QWEN -> ModelInfo(MODEL_QWEN, "Qwen 2.5 0.5B", "Fast and high-quality", QWEN_URL, 547_000_000L, 30, true)
             MODEL_GEMMA3_270M -> ModelInfo(MODEL_GEMMA3_270M, "Gemma 3 270M", "Balanced performance", GEMMA3_270M_URL, 249_000_000L, 20, false)
             MODEL_SMOLLM_135M -> ModelInfo(MODEL_SMOLLM_135M, "SmolLM 135M", "Fastest, smallest", SMOLLM_135M_URL, 167_000_000L, 50, false)
             else -> throw IllegalArgumentException("Unknown model: $modelId")

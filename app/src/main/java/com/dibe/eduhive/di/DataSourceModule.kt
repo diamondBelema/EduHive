@@ -1,12 +1,12 @@
 package com.dibe.eduhive.di
 
-
 import android.content.Context
 import com.dibe.eduhive.data.local.dao.*
 import com.dibe.eduhive.data.source.ai.AIDataSource
 import com.dibe.eduhive.data.source.ai.AIModelManager
 import com.dibe.eduhive.data.source.ai.FlashcardValidator
 import com.dibe.eduhive.data.source.ai.ModelPreferences
+import com.dibe.eduhive.data.source.file.DocumentCleaner
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.data.source.local.ConceptLocalDataSource
 import com.dibe.eduhive.data.source.local.FlashcardLocalDataSource
@@ -21,7 +21,6 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import javax.inject.Inject
 import javax.inject.Singleton
 
 @Module
@@ -47,13 +46,15 @@ object DataSourceModule {
     @Provides @Singleton
     fun provideReviewLocal(ds: ReviewDao) = ReviewEventLocalDataSource(ds)
 
-    // File
+    // File — DocumentCleaner is @Singleton via @Inject constructor,
+    // so Hilt will auto-provide it. We just declare FileDataSource here.
     @Provides @Singleton
     fun provideFileDataSource(
-        @ApplicationContext context: Context
-    ) = FileDataSource(context)
+        @ApplicationContext context: Context,
+        cleaner: DocumentCleaner             // ← Hilt injects the cleaner
+    ) = FileDataSource(context, cleaner)
 
-    // AI  ❗ FIXED BUG HERE
+    // AI
     @Provides @Singleton
     fun provideFlashcardValidator(): FlashcardValidator = FlashcardValidator()
 
@@ -83,5 +84,4 @@ object DataSourceModule {
     fun provideDownloader(
         @ApplicationContext context: Context
     ): Downloader = ModelDownloader(context)
-
 }

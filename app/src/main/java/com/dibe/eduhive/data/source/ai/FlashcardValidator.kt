@@ -6,62 +6,61 @@ import javax.inject.Singleton
 /**
  * Validates the quality of AI-generated flashcards before they are stored.
  *
- * Scores each flashcard on a 0–1 scale and determines whether it passes
- * the minimum quality threshold.
+ * Philosophy: be permissive enough that small models don't get stuck in
+ * endless retry loops. The goal is to filter out genuinely broken cards
+ * (empty, too short, placeholder text) not to enforce stylistic rules
+ * that small models struggle to follow consistently.
  */
 @Singleton
 class FlashcardValidator @Inject constructor() {
 
     companion object {
         /** Minimum quality score (0–1) for a flashcard to be accepted. */
-        const val MIN_QUALITY_SCORE = 0.7f
+        const val MIN_QUALITY_SCORE = 0.5f  // Lowered from 0.7 — small models need more room
 
         /** Minimum character length for the question (front). */
-        private const val MIN_FRONT_LENGTH = 10
+        private const val MIN_FRONT_LENGTH = 8
 
         /** Minimum character length for the answer (back). */
-        private const val MIN_BACK_LENGTH = 5
+        private const val MIN_BACK_LENGTH = 4
 
-        /** Optimal answer length range for quality scoring (characters). */
-        private const val OPTIMAL_ANSWER_MIN_LENGTH = 10
-        private const val OPTIMAL_ANSWER_MAX_LENGTH = 150
+        /** Optimal answer length range (characters). */
+        private const val OPTIMAL_ANSWER_MIN_LENGTH = 8
+        private const val OPTIMAL_ANSWER_MAX_LENGTH = 200
 
-        /** Optimal word count range for quality scoring. */
-        private const val OPTIMAL_WORD_COUNT_MIN = 3
-        private const val OPTIMAL_WORD_COUNT_MAX = 30
-
-        /** Terms that indicate a vague or placeholder question/answer. */
-        private val VAGUE_TERMS = listOf(
-            "something", "undefined", "null", "n/a", "placeholder",
-            "example here", "fill in"
+        /** Terms that indicate a truly broken placeholder response. */
+        private val BROKEN_TERMS = listOf(
+            "undefined", "null", "n/a", "placeholder",
+            "example here", "fill in", "[question", "[answer", "[front", "[back"
         )
     }
 
-    /**
-     * Validates a single flashcard and returns a quality report.
-     */
     fun validate(card: GeneratedFlashcard): FlashcardQuality {
         val issues = mutableListOf<String>()
 
-        if (card.front.length < MIN_FRONT_LENGTH) {
-            issues.add("Question too short (${card.front.length} chars, min $MIN_FRONT_LENGTH)")
+        // Hard failures — card is genuinely unusable
+        if (card.front.isBlank() || card.front.length < MIN_FRONT_LENGTH) {
+            issues.add("Question too short")
+        }
+        if (card.back.isBlank() || card.back.length < MIN_BACK_LENGTH) {
+            issues.add("Answer too short")
         }
 
-        if (card.back.length < MIN_BACK_LENGTH) {
-            issues.add("Answer too short (${card.back.length} chars, min $MIN_BACK_LENGTH)")
-        }
-
-        if (!card.front.trim().endsWith("?")) {
-            issues.add("Question does not end with '?'")
-        }
-
-        for (term in VAGUE_TERMS) {
+        // Check for placeholder/broken output — but NOT question mark absence
+        // Small models frequently produce valid fill-in-the-blank or definition
+        // style fronts without a "?" and these are educationally sound.
+        for (term in BROKEN_TERMS) {
             if (card.front.contains(term, ignoreCase = true)) {
-                issues.add("Question contains vague term: '$term'")
+                issues.add("Question contains placeholder: '$term'")
             }
             if (card.back.contains(term, ignoreCase = true)) {
-                issues.add("Answer contains vague term: '$term'")
+                issues.add("Answer contains placeholder: '$term'")
             }
+        }
+
+        // Soft check: front and back shouldn't be identical
+        if (card.front.trim().lowercase() == card.back.trim().lowercase()) {
+            issues.add("Question and answer are identical")
         }
 
         val score = calculateScore(card, issues)
@@ -72,16 +71,10 @@ class FlashcardValidator @Inject constructor() {
         )
     }
 
-    /**
-     * Filters a list of flashcards to only valid ones.
-     */
     fun filterValid(cards: List<GeneratedFlashcard>): List<GeneratedFlashcard> {
         return cards.filter { validate(it).isValid }
     }
 
-    /**
-     * Returns the pass rate of a list of flashcards (0.0–1.0).
-     */
     fun passRate(cards: List<GeneratedFlashcard>): Float {
         if (cards.isEmpty()) return 0f
         val valid = cards.count { validate(it).isValid }
@@ -89,30 +82,24 @@ class FlashcardValidator @Inject constructor() {
     }
 
     private fun calculateScore(card: GeneratedFlashcard, issues: List<String>): Float {
-        // Start from a neutral base; bonuses can push above 0.7 (passing threshold)
-        var score = 0.7f
+        var score = 0.6f  // Neutral base
 
-        // Deduct for each quality issue
-        score -= issues.size * 0.2f
+        // Hard deduction per issue
+        score -= issues.size * 0.25f
 
-        // Reward longer, more informative answers (up to a point)
+        // Bonus for answer being a reasonable length
         if (card.back.length in OPTIMAL_ANSWER_MIN_LENGTH..OPTIMAL_ANSWER_MAX_LENGTH) {
-            score += 0.15f
+            score += 0.2f
         }
 
-        // Reward diverse vocabulary (rough proxy: word count)
-        val wordCount = card.back.split(Regex("\\s+")).size
-        if (wordCount in OPTIMAL_WORD_COUNT_MIN..OPTIMAL_WORD_COUNT_MAX) {
-            score += 0.15f
-        }
+        // Bonus if answer has multiple words (not just a single word response)
+        val wordCount = card.back.split(Regex("\\s+")).filter { it.isNotBlank() }.size
+        if (wordCount >= 3) score += 0.2f
 
         return score.coerceIn(0f, 1f)
     }
 }
 
-/**
- * Quality report for a single flashcard.
- */
 data class FlashcardQuality(
     val isValid: Boolean,
     val score: Float,
