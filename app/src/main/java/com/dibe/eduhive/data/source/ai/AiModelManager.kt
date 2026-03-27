@@ -43,6 +43,7 @@ class AIModelManager @Inject constructor(
         private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q4_0-web.task?download=true"
 
+
         /**
          * Maximum input characters allowed.
          * 3500 chars is roughly 800-900 tokens, which fits comfortably 
