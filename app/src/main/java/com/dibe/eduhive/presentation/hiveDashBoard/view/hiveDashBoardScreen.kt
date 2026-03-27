@@ -33,8 +33,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dibe.eduhive.domain.model.Concept
+import com.dibe.eduhive.manager.TaskType
 import com.dibe.eduhive.presentation.hiveDashBoard.viewmodel.HiveDashboardEvent
 import com.dibe.eduhive.presentation.hiveDashBoard.viewmodel.HiveDashboardViewModel
+import com.dibe.eduhive.ui.components.TaskMonitorBottomSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +54,7 @@ fun HiveDashboardScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
+    var showTaskMonitor by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -64,6 +67,21 @@ fun HiveDashboardScreen(
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    if (showTaskMonitor) {
+        TaskMonitorBottomSheet(
+            activeTasks = state.activeTasks,
+            onDismiss = { showTaskMonitor = false },
+            onTaskClick = { task ->
+                showTaskMonitor = false
+                when (task.type) {
+                    TaskType.MATERIAL -> onNavigateToAddMaterial()
+                    TaskType.FLASHCARD, TaskType.QUIZ -> onNavigateToConcepts()
+                    else -> Unit
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -82,6 +100,25 @@ fun HiveDashboardScreen(
                     }
                 },
                 actions = {
+                    if (state.activeTasks.isNotEmpty()) {
+                        BadgedBox(
+                            badge = {
+                                Badge {
+                                    Text(
+                                        text = state.activeTasks.size.toString(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        ) {
+                            IconButton(onClick = { showTaskMonitor = true }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.AutoAwesome,
+                                    contentDescription = "Running tasks"
+                                )
+                            }
+                        }
+                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                     }

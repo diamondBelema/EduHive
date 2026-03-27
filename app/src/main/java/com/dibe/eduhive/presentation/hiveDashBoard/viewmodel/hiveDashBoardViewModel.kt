@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.dibe.eduhive.domain.usecase.dashboard.DashboardOverview
 import com.dibe.eduhive.domain.usecase.dashboard.GetDashboardOverviewUseCase
 import com.dibe.eduhive.domain.repository.QuizRepository
+import com.dibe.eduhive.manager.GlobalTaskManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,7 @@ import javax.inject.Inject
 class HiveDashboardViewModel @Inject constructor(
     private val getDashboardOverviewUseCase: GetDashboardOverviewUseCase,
     private val quizRepository: QuizRepository,
+    private val globalTaskManager: GlobalTaskManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -29,6 +31,7 @@ class HiveDashboardViewModel @Inject constructor(
 
     init {
         loadDashboard()
+        observeTasks()
     }
 
     fun onEvent(event: HiveDashboardEvent) {
@@ -36,6 +39,14 @@ class HiveDashboardViewModel @Inject constructor(
             is HiveDashboardEvent.Refresh -> loadDashboard()
             is HiveDashboardEvent.ClearError -> {
                 _state.update { it.copy(error = null) }
+            }
+        }
+    }
+
+    private fun observeTasks() {
+        viewModelScope.launch {
+            globalTaskManager.activeTasks.collect { tasks ->
+                _state.update { state -> state.copy(activeTasks = tasks.filter { task -> task.hiveId == hiveId }) }
             }
         }
     }

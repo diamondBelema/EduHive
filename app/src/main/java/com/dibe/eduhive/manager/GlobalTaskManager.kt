@@ -27,7 +27,7 @@ class GlobalTaskManager @Inject constructor(
         val allInfos = (materials ?: emptyList()) + (flashcards ?: emptyList()) + (quizzes ?: emptyList())
         
         allInfos
-            .filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+            .filter { it.state == WorkInfo.State.RUNNING }
             .map { info ->
                 val type = when {
                     info.tags.contains("material_processing") -> TaskType.MATERIAL
