@@ -27,16 +27,9 @@ class EduHiveApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-
-        // Create models directory
         setupModelStorage()
-
-        // Initialize PDFBox
         PDFBoxResourceLoader.init(this)
-
-        // Initialize Notifications
         NotificationHelper.createNotificationChannel(this)
-
         Log.d(TAG, "✅ EduHive initialized successfully")
     }
 
@@ -47,14 +40,12 @@ class EduHiveApplication : Application(), Configuration.Provider {
                 val created = modelsDir.mkdirs()
                 Log.d(TAG, "Models directory created: $created")
             }
-
             Log.d(TAG, """
                 Storage Setup:
                 - Path: ${modelsDir.absolutePath}
                 - Writable: ${modelsDir.canWrite()}
                 - Free Space: ${filesDir.freeSpace / (1024 * 1024)}MB
             """.trimIndent())
-
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create models directory", e)
         }
