@@ -3,7 +3,6 @@ package com.dibe.eduhive.workers
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.dibe.eduhive.domain.repository.ConceptRepository
@@ -19,25 +18,25 @@ class FlashcardGenerationWorker @AssistedInject constructor(
     private val conceptRepository: ConceptRepository
 ) : CoroutineWorker(context, params) {
 
+    private val notificationManager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
     override suspend fun doWork(): Result {
         val conceptIds = inputData.getStringArray(KEY_CONCEPT_IDS)?.toList()
             ?: return Result.failure(workDataOf(KEY_ERROR to "Missing conceptIds"))
         val hiveId = inputData.getString(KEY_HIVE_ID)
             ?: return Result.failure(workDataOf(KEY_ERROR to "Missing hiveId"))
 
-        // Show foreground notification for background tasks
-        setForeground(createForegroundInfo(0, conceptIds.size))
+        val total = conceptIds.size
+        setProgress(workDataOf(KEY_COMPLETED to 0, KEY_TOTAL to total))
+        postNotification(0, total)
 
         return try {
-            val total = conceptIds.size
-            setProgress(workDataOf(KEY_COMPLETED to 0, KEY_TOTAL to total))
-
             var completed = 0
             for (conceptId in conceptIds) {
                 val concept = conceptRepository.getConceptById(conceptId) ?: continue
 
-                // Update notification for current progress
-                setForeground(createForegroundInfo(completed, total, concept.name))
+                postNotification(completed, total, concept.name)
 
                 flashcardRepository.generateFlashcardsForConcept(
                     conceptId = conceptId,
@@ -50,8 +49,10 @@ class FlashcardGenerationWorker @AssistedInject constructor(
                 setProgress(workDataOf(KEY_COMPLETED to completed, KEY_TOTAL to total))
             }
 
+            cancelNotification()
             Result.success(workDataOf(KEY_HIVE_ID to hiveId, KEY_STATUS to STATUS_COMPLETE))
         } catch (e: Exception) {
+            cancelNotification()
             if (runAttemptCount < MAX_RETRIES) {
                 Result.retry()
             } else {
@@ -60,20 +61,22 @@ class FlashcardGenerationWorker @AssistedInject constructor(
         }
     }
 
-    private fun createForegroundInfo(completed: Int, total: Int, currentConcept: String? = null): ForegroundInfo {
+    private fun postNotification(completed: Int, total: Int, currentConcept: String? = null) {
         val content = if (currentConcept != null) {
             "Generating cards for: $currentConcept ($completed/$total)"
         } else {
             "Generating flashcards... ($completed/$total)"
         }
-
         val notification = NotificationHelper.getBaseNotification(
             context,
             "Study Hive: Flashcard Generation",
             content
-        ).setProgress(total, completed, false).build()
+        ).setProgress(total, completed, completed == 0 && total == 0).build()
+        notificationManager.notify(NotificationHelper.NOTIFICATION_ID, notification)
+    }
 
-        return ForegroundInfo(NotificationHelper.NOTIFICATION_ID, notification)
+    private fun cancelNotification() {
+        notificationManager.cancel(NotificationHelper.NOTIFICATION_ID)
     }
 
     companion object {
