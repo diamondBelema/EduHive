@@ -30,6 +30,19 @@
             android:value="ocr" />
         <!-- To use multiple models: android:value="ocr,model2,model3" -->
 
+        <!-- Disable the default WorkManager initializer so we can use the
+             Hilt-provided HiltWorkerFactory via Configuration.Provider. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

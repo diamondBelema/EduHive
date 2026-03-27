@@ -2,16 +2,27 @@ package com.dibe.eduhive
 
 import android.app.Application
 import android.util.Log
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
+import javax.inject.Inject
 
 @HiltAndroidApp
-class EduHiveApplication : Application() {
+class EduHiveApplication : Application(), Configuration.Provider {
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
 
     companion object {
         private const val TAG = "EduHive"
     }
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
 
     override fun onCreate() {
         super.onCreate()
