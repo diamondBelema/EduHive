@@ -17,7 +17,7 @@ object LLMPromptTemplates {
         return """
 Extract up to 10 unique and distinct concepts from the text below.
 Avoid overlapping or repetitive ideas. Focus on core terminology and logic.
-${contextLine}
+$contextLine
 Text:
 $text
 
@@ -89,7 +89,7 @@ BACK: ...
         }.joinToString("\n")
 
         return """
-Create ${countPerConcept} flashcards for each of these ${concepts.size} concepts:
+Create $countPerConcept flashcards for each of these ${concepts.size} concepts:
 $conceptsBlock
 
 Tag each card with its concept number. Output format:
