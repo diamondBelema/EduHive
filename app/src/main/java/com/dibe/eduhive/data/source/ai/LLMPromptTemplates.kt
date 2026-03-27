@@ -32,19 +32,43 @@ DESCRIPTION: Another distinct idea from the provided text, not a repeat.
 
     fun flashcardDraft(conceptName: String, conceptDescription: String, count: Int): String {
         return """
-Create $count high-quality flashcards for: $conceptName
+Create $count high-quality flashcards for the concept below.
+
+Concept: $conceptName
 Context: $conceptDescription
 
-Each card must cover a DIFFERENT aspect of the concept (e.g., definition, use-case, counter-example).
-Do not repeat the same question in different words.
+STRICT RULES:
+- Do NOT use generic questions like:
+  "What is...", "Why is ... important?", "What is the main idea..."
+- Each question must reference a SPECIFIC detail, mechanism, example, or implication.
+- Each card must test a DIFFERENT cognitive angle:
+  (definition, mechanism, example, comparison, application, edge case)
+- Questions must NOT be reusable for other topics.
+- Answers must be precise and directly derived from the context.
+
+BAD EXAMPLES (DO NOT COPY):
+FRONT: What is $conceptName?
+BACK: It is...
+
+FRONT: Why is $conceptName important?
+BACK: It is important because...
+
+GOOD EXAMPLES:
+FRONT: What specific role does "$conceptName" play in [contextual mechanism]?
+BACK: It functions by...
+
+FRONT: In what situation would "$conceptName" fail or not apply?
+BACK: It fails when...
+
+FRONT: How does "$conceptName" differ from a closely related idea?
+BACK: Unlike..., it...
+
+Now generate the flashcards.
 
 Output format:
-FRONT: What is the main idea of "$conceptName"?
-BACK: The main idea is: [one clear sentence based only on the provided concept context].
-
-FRONT: Why is "$conceptName" important?
-BACK: It is important because: [one specific reason grounded in the provided context].
-        """.trimIndent()
+FRONT: ...
+BACK: ...
+    """.trimIndent()
     }
 
     /**
@@ -103,16 +127,15 @@ $cardsBlock
     // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * Generate quiz questions grounded in existing flashcard facts.
+     * Generate quiz questions for a single concept.
      *
-     * [facts] is a list of "Q: <front> | A: <back>" strings built from the
-     * concept's existing flashcards. Each fact is a distinct piece of knowledge,
-     * so each question the model produces is forced to cover something different.
-     * This eliminates the duplicate-question problem that occurs when the model
-     * is asked to generate 5 questions from a single one-sentence description.
+     * Why we show both MCQ and TRUE_FALSE examples:
+     * Without seeing both formats, small models default to producing only MCQ.
+     * Showing one of each primes them to alternate — which gives more variety
+     * and a better quiz experience.
      *
-     * If no flashcards exist yet, [facts] is empty and we fall back to the
-     * concept description, capped at count=1 by the caller.
+     * The prompt ends after the second complete example block (TRUE_FALSE),
+     * which primes the model to continue writing QUESTION 1.
      */
     fun quizGeneration(
         conceptName: String,
@@ -120,35 +143,51 @@ $cardsBlock
         facts: List<String>,
         count: Int
     ): String {
+
         val factsBlock = if (facts.isNotEmpty()) {
-            "Write one question based on each of these facts:\n" +
-                    facts.mapIndexed { i, f -> "${i + 1}. $f" }.joinToString("\n")
+            """
+Write at least one question based on each of these facts:
+${facts.mapIndexed { i, f -> "${i + 1}. $f" }.joinToString("\n")}
+        """.trimIndent()
         } else {
             "Context: $conceptDescription"
         }
 
         return """
-Create $count quiz questions about: $conceptName
+Write $count high-quality quiz questions about: $conceptName
+
 $factsBlock
 
-MCQ format — options must be real answer choices, not labels:
-QUESTION 1
-TYPE: MCQ
-TEXT: What is the primary site of ATP production in a cell?
-OPTION A: The nucleus
-OPTION B: The mitochondria
-OPTION C: The ribosome
-OPTION D: The cell membrane
-CORRECT: B
+RULES:
+- Use TRUE_FALSE for simple factual statements
+- Use MCQ when there are multiple plausible answers
+- Each question must test a DIFFERENT aspect (definition, mechanism, example, comparison, application)
+- Avoid generic or obvious questions
+- Questions must require understanding, not just recall
+- MCQ options must be realistic and plausible (no joke or obvious throwaways)
+- Include at least one tricky or misleading option in MCQs
+- Do NOT repeat patterns from the examples
 
-TRUE_FALSE format:
-QUESTION 2
+FORMAT EXAMPLES (follow strictly):
+
+QUESTION 1
 TYPE: TRUE_FALSE
-TEXT: The mitochondria is found only in plant cells.
+TEXT: The French Revolution began in 1789.
 OPTION A: True
 OPTION B: False
+CORRECT: A
+
+QUESTION 2
+TYPE: MCQ
+TEXT: Which country did Napoleon Bonaparte originally come from?
+OPTION A: France
+OPTION B: Corsica
+OPTION C: Italy
+OPTION D: Spain
 CORRECT: B
-        """.trimIndent()
+
+Now continue with QUESTION 1.
+    """.trimIndent()
     }
 
     fun mutate(basePrompt: String, attempt: Int): String {

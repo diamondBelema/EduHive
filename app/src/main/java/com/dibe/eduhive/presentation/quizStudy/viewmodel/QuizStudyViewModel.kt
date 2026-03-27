@@ -54,22 +54,29 @@ class QuizStudyViewModel @Inject constructor(
     fun submitResults(results: Map<String, String>) {
         viewModelScope.launch {
             _state.update { it.copy(isSubmitting = true) }
-            
+
+            // Build a lookup from quizId -> conceptId using the loaded quiz pairs.
+            // question.quizId is the quiz's ID, not the concept's ID.
+            // We need the concept's ID to update confidence in the learning engine.
+            val quizIdToConceptId = state.value.quizPairs
+                .associate { (quiz, _) -> quiz.id to quiz.conceptId }
+
             val questions = state.value.quizPairs.flatMap { it.second }
-            
+
             questions.forEach { question ->
                 val selected = results[question.id] ?: return@forEach
                 val isCorrect = isAnswerCorrect(selected, question.correctAnswer)
                 val duration = System.currentTimeMillis() - (startTimeMap[question.id] ?: System.currentTimeMillis())
-                
+                val conceptId = quizIdToConceptId[question.quizId] ?: return@forEach
+
                 submitQuizResultUseCase(
-                    conceptId = question.quizId, // Assuming quizId maps to concept context or similar
+                    conceptId = conceptId,
                     questionId = question.id,
                     wasCorrect = isCorrect,
                     responseTimeMs = duration
                 )
             }
-            
+
             _state.update { it.copy(isSubmitting = false) }
         }
     }
@@ -77,8 +84,8 @@ class QuizStudyViewModel @Inject constructor(
     private fun isAnswerCorrect(selected: String, correctAnswerRaw: String): Boolean {
         val correct = correctAnswerRaw.trim().uppercase()
         return selected.uppercase() == correct ||
-            (selected.uppercase() == "A" && correct == "TRUE") ||
-            (selected.uppercase() == "B" && correct == "FALSE")
+                (selected.uppercase() == "A" && correct == "TRUE") ||
+                (selected.uppercase() == "B" && correct == "FALSE")
     }
 
     fun loadQuizzesForHive() {

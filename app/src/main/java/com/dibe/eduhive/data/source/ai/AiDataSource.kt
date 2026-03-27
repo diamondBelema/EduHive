@@ -269,18 +269,7 @@ class AIDataSource @Inject constructor(
     // Quiz generation
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Generate quiz questions with streaming progress.
-     *
-     * [facts] is a list of "Q: <front> | A: <back>" strings derived from the
-     * concept's existing flashcards. One question is generated per fact, giving
-     * the model a distinct piece of knowledge to work with for each question —
-     * which eliminates the rephrasing-the-same-question problem.
-     *
-     * [questionCount] should equal facts.size. If facts is empty, the caller
-     * should pass questionCount=1 so the model isn't asked to invent multiple
-     * questions from a single one-sentence description.
-     */
+    /** Generate quiz questions with streaming progress. */
     fun generateQuizStreaming(
         conceptName: String,
         conceptDescription: String,
@@ -592,6 +581,14 @@ class AIDataSource @Inject constructor(
 
     private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
         val questions = mutableListOf<GeneratedQuizQuestion>()
+        val seenTexts = mutableSetOf<String>()
+
+        // Known example question texts from the prompt — skip these if model echoes them
+        val exampleTexts = setOf(
+            "the french revolution began in 1789",
+            "which country did napoleon bonaparte originally come from"
+        )
+
         val blocks = response.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))
 
         for (block in blocks) {
@@ -613,11 +610,63 @@ class AIDataSource @Inject constructor(
                     trimmed.startsWith("CORRECT:", ignoreCase = true) -> correct = trimmed.substringAfter(":").trim()
                 }
             }
-            if (text.isNotEmpty()) {
-                questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, correct))
+
+            if (text.isBlank()) continue
+
+            // Drop echo of prompt examples
+            if (text.trim().lowercase() in exampleTexts) {
+                Log.w(TAG, "Dropping echoed example question: \"$text\"")
+                continue
             }
+
+            // Drop duplicates within this response
+            val key = text.trim().lowercase()
+            if (key in seenTexts) {
+                Log.w(TAG, "Dropping duplicate question: \"$text\"")
+                continue
+            }
+            seenTexts.add(key)
+
+            // Drop MCQ questions that only have True/False as options — model got confused
+            val isFakeMcq = type.equals("MCQ", ignoreCase = true) &&
+                    options.size == 2 &&
+                    options.any { it.equals("True", ignoreCase = true) } &&
+                    options.any { it.equals("False", ignoreCase = true) }
+            if (isFakeMcq) {
+                Log.w(TAG, "Dropping MCQ with only True/False options — converting to TRUE_FALSE: \"$text\"")
+                type = "TRUE_FALSE"
+            }
+
+            // Normalize correctAnswer to a letter
+            val normalizedCorrect = normalizeCorrectAnswer(correct, options)
+
+            questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, normalizedCorrect))
         }
         return questions
+    }
+
+    /**
+     * Normalize the CORRECT: field to a single uppercase letter (A, B, C, D).
+     * Handles: bare letter, True/False text, full option text match.
+     */
+    private fun normalizeCorrectAnswer(correct: String, options: List<String>): String {
+        val trimmed = correct.trim()
+
+        if (trimmed.length == 1 && trimmed.uppercase() in listOf("A", "B", "C", "D")) {
+            return trimmed.uppercase()
+        }
+        if (trimmed.equals("true",  ignoreCase = true)) return "A"
+        if (trimmed.equals("false", ignoreCase = true)) return "B"
+
+        val matchIndex = options.indexOfFirst { opt ->
+            opt.trim().equals(trimmed, ignoreCase = true) ||
+                    opt.trim().lowercase().contains(trimmed.lowercase()) ||
+                    trimmed.lowercase().contains(opt.trim().lowercase())
+        }
+        if (matchIndex >= 0) return ('A' + matchIndex).toString()
+
+        Log.w(TAG, "Could not normalize correctAnswer: \"$correct\" for options: $options")
+        return trimmed.uppercase()
     }
 
     private fun deduplicateConcepts(concepts: List<ExtractedConcept>): List<ExtractedConcept> {
