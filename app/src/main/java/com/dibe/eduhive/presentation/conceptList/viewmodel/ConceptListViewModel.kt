@@ -3,6 +3,8 @@ package com.dibe.eduhive.presentation.conceptList.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.dibe.eduhive.domain.model.Concept
 import com.dibe.eduhive.domain.model.Flashcard
 import com.dibe.eduhive.domain.model.Quiz
@@ -11,14 +13,17 @@ import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.QuizRepository
 import com.dibe.eduhive.domain.usecase.concept.GetConceptsByHiveUseCase
 import com.dibe.eduhive.domain.usecase.progress.GetWeakConceptsUseCase
+import com.dibe.eduhive.manager.BackgroundGenerationManager
+import com.dibe.eduhive.workers.FlashcardGenerationWorker
+import com.dibe.eduhive.workers.QuizGenerationWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
@@ -27,6 +32,8 @@ class ConceptListViewModel @Inject constructor(
     private val getWeakConceptsUseCase: GetWeakConceptsUseCase,
     private val flashcardRepository: FlashcardRepository,
     private val quizRepository: QuizRepository,
+    private val backgroundGenerationManager: BackgroundGenerationManager,
+    private val workManager: WorkManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -97,63 +104,164 @@ class ConceptListViewModel @Inject constructor(
         }
         if (selectedConcepts.isEmpty()) return
 
+        val conceptIds = selectedConcepts.map { it.id }
+
+        _state.update {
+            it.copy(
+                isGenerating = true,
+                generationProgress = "Scheduling generation...",
+                selectedIds = emptySet()
+            )
+        }
+
+        when (mode) {
+            GenerationMode.FLASHCARDS -> {
+                val workId = backgroundGenerationManager.scheduleFlashcardGeneration(hiveId, conceptIds)
+                observeFlashcardWork(workId, conceptIds, mode)
+            }
+            GenerationMode.QUIZ -> {
+                val workId = backgroundGenerationManager.scheduleQuizGeneration(hiveId, conceptIds)
+                observeQuizWork(workId, conceptIds, mode)
+            }
+            GenerationMode.BOTH -> {
+                val flashWorkId = backgroundGenerationManager.scheduleFlashcardGeneration(hiveId, conceptIds)
+                val quizWorkId = backgroundGenerationManager.scheduleQuizGeneration(hiveId, conceptIds)
+                observeBothWork(flashWorkId, quizWorkId, conceptIds)
+            }
+        }
+    }
+
+    private fun observeFlashcardWork(workId: UUID, conceptIds: List<String>, mode: GenerationMode) {
         viewModelScope.launch {
-            _state.update { it.copy(isGenerating = true, generationProgress = "Starting generation...") }
-
-            try {
-                val generatedFlashcards = mutableListOf<Flashcard>()
-                val generatedQuizPairs = mutableListOf<Pair<Quiz, List<QuizQuestion>>>()
-
-                if (mode == GenerationMode.FLASHCARDS || mode == GenerationMode.BOTH) {
-                    _state.update { it.copy(generationProgress = "Generating flashcards for ${selectedConcepts.size} concept(s)...") }
-
-                    val flashcardJobs = selectedConcepts.map { concept ->
-                        async {
-                            flashcardRepository.generateFlashcardsForConcept(
-                                conceptId = concept.id,
-                                conceptName = concept.name,
-                                conceptDescription = concept.description,
-                                count = 3
+            workManager.getWorkInfoByIdFlow(workId).collect { workInfo ->
+                when (workInfo?.state) {
+                    WorkInfo.State.RUNNING -> {
+                        val completed = workInfo.progress.getInt(FlashcardGenerationWorker.KEY_COMPLETED, 0)
+                        val total = workInfo.progress.getInt(FlashcardGenerationWorker.KEY_TOTAL, 0)
+                        _state.update { it.copy(generationProgress = "Generating flashcards: $completed/$total") }
+                    }
+                    WorkInfo.State.SUCCEEDED -> {
+                        val flashcards = conceptIds.flatMap { conceptId ->
+                            flashcardRepository.getFlashcardsForConcept(conceptId)
+                        }
+                        _state.update {
+                            it.copy(
+                                isGenerating = false,
+                                generationProgress = null,
+                                generatedFlashcards = flashcards,
+                                generationMode = mode
                             )
                         }
                     }
-                    generatedFlashcards.addAll(flashcardJobs.awaitAll().flatten())
-                }
-
-                if (mode == GenerationMode.QUIZ || mode == GenerationMode.BOTH) {
-                    _state.update { it.copy(generationProgress = "Generating quiz questions...") }
-
-                    // Generate quizzes sequentially to avoid overwhelming the on-device model
-                    selectedConcepts.forEach { concept ->
-                        val result = quizRepository.generateQuizForConcept(
-                            conceptId = concept.id,
-                            conceptName = concept.name,
-                            conceptDescription = concept.description,
-                            questionCount = 3
-                        )
-                        generatedQuizPairs.add(result)
+                    WorkInfo.State.FAILED -> {
+                        _state.update {
+                            it.copy(
+                                isGenerating = false,
+                                generationProgress = null,
+                                error = "Flashcard generation failed"
+                            )
+                        }
                     }
-                }
-
-                _state.update {
-                    it.copy(
-                        isGenerating = false,
-                        generationProgress = null,
-                        generatedFlashcards = generatedFlashcards,
-                        generatedQuizPairs = generatedQuizPairs,
-                        generationMode = mode,
-                        selectedIds = emptySet()
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        isGenerating = false,
-                        generationProgress = null,
-                        error = e.message ?: "Generation failed"
-                    )
+                    else -> {}
                 }
             }
+        }
+    }
+
+    private fun observeQuizWork(workId: UUID, conceptIds: List<String>, mode: GenerationMode) {
+        viewModelScope.launch {
+            workManager.getWorkInfoByIdFlow(workId).collect { workInfo ->
+                when (workInfo?.state) {
+                    WorkInfo.State.RUNNING -> {
+                        val completed = workInfo.progress.getInt(QuizGenerationWorker.KEY_COMPLETED, 0)
+                        val total = workInfo.progress.getInt(QuizGenerationWorker.KEY_TOTAL, 0)
+                        _state.update { it.copy(generationProgress = "Generating quiz: $completed/$total") }
+                    }
+                    WorkInfo.State.SUCCEEDED -> {
+                        val quizPairs = fetchLatestQuizPairs(conceptIds)
+                        _state.update {
+                            it.copy(
+                                isGenerating = false,
+                                generationProgress = null,
+                                generatedQuizPairs = quizPairs,
+                                generationMode = mode
+                            )
+                        }
+                    }
+                    WorkInfo.State.FAILED -> {
+                        _state.update {
+                            it.copy(
+                                isGenerating = false,
+                                generationProgress = null,
+                                error = "Quiz generation failed"
+                            )
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private fun observeBothWork(flashWorkId: UUID, quizWorkId: UUID, conceptIds: List<String>) {
+        viewModelScope.launch {
+            combine(
+                workManager.getWorkInfoByIdFlow(flashWorkId),
+                workManager.getWorkInfoByIdFlow(quizWorkId)
+            ) { flashInfo, quizInfo -> Pair(flashInfo, quizInfo) }
+                .collect { (flashInfo, quizInfo) ->
+                    val flashState = flashInfo?.state
+                    val quizState = quizInfo?.state
+
+                    when {
+                        flashState == WorkInfo.State.FAILED || quizState == WorkInfo.State.FAILED -> {
+                            _state.update {
+                                it.copy(
+                                    isGenerating = false,
+                                    generationProgress = null,
+                                    error = "Generation failed"
+                                )
+                            }
+                        }
+                        flashState == WorkInfo.State.SUCCEEDED && quizState == WorkInfo.State.SUCCEEDED -> {
+                            val flashcards = conceptIds.flatMap { conceptId ->
+                                flashcardRepository.getFlashcardsForConcept(conceptId)
+                            }
+                            val quizPairs = fetchLatestQuizPairs(conceptIds)
+                            _state.update {
+                                it.copy(
+                                    isGenerating = false,
+                                    generationProgress = null,
+                                    generatedFlashcards = flashcards,
+                                    generatedQuizPairs = quizPairs,
+                                    generationMode = GenerationMode.BOTH
+                                )
+                            }
+                        }
+                        else -> {
+                            val flashCompleted = flashInfo?.progress?.getInt(FlashcardGenerationWorker.KEY_COMPLETED, 0) ?: 0
+                            val flashTotal = flashInfo?.progress?.getInt(FlashcardGenerationWorker.KEY_TOTAL, 0) ?: 0
+                            val quizCompleted = quizInfo?.progress?.getInt(QuizGenerationWorker.KEY_COMPLETED, 0) ?: 0
+                            val quizTotal = quizInfo?.progress?.getInt(QuizGenerationWorker.KEY_TOTAL, 0) ?: 0
+                            _state.update {
+                                it.copy(
+                                    generationProgress = "Flashcards: $flashCompleted/$flashTotal | Quiz: $quizCompleted/$quizTotal"
+                                )
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    /** Fetches the most recently generated quiz and its questions for each concept. */
+    private suspend fun fetchLatestQuizPairs(conceptIds: List<String>): List<Pair<Quiz, List<QuizQuestion>>> {
+        return conceptIds.flatMap { conceptId ->
+            val quizzes = quizRepository.getQuizzesForConcept(conceptId)
+            val latestQuiz = quizzes.maxByOrNull { it.createdAt }
+            latestQuiz?.let { quiz ->
+                quizRepository.getQuizWithQuestions(quiz.id)?.let { listOf(it) } ?: emptyList()
+            } ?: emptyList()
         }
     }
 

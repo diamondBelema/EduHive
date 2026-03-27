@@ -37,6 +37,12 @@ ketch = "2.0.3"
 # Adaptive UI - use stable or latest RC
 adaptive = "1.0.1"
 
+# WorkManager
+workManager = "2.10.0"
+
+# AndroidX Hilt extensions (WorkManager integration)
+hiltWork = "1.2.0"
+
 [libraries]
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -99,6 +105,13 @@ androidx-test-core = { module = "androidx.test:core", version = "1.7.0" }
 mediapipe-tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipe" }
 
 ketch = { module = "com.github.khushpanchal:Ketch", version.ref = "ketch" }
+
+# WorkManager
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workManager" }
+
+# AndroidX Hilt extensions (WorkManager + ViewModel)
+androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "hiltWork" }
+androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltWork" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
