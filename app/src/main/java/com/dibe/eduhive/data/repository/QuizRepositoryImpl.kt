@@ -5,6 +5,7 @@ import com.dibe.eduhive.data.local.entity.QuizQuestionEntity
 import com.dibe.eduhive.data.source.ai.AIDataSource
 import com.dibe.eduhive.data.source.ai.GeneratedQuizQuestion
 import com.dibe.eduhive.data.source.ai.QuizGenerationState
+import com.dibe.eduhive.data.source.local.FlashcardLocalDataSource
 import com.dibe.eduhive.data.source.local.QuizLocalDataSource
 import com.dibe.eduhive.domain.model.Quiz
 import com.dibe.eduhive.domain.model.QuizQuestion
@@ -18,6 +19,7 @@ import jakarta.inject.Inject
 
 class QuizRepositoryImpl @Inject constructor(
     private val localDataSource: QuizLocalDataSource,
+    private val flashcardLocalDataSource: FlashcardLocalDataSource,
     private val aiDataSource: AIDataSource
 ) : QuizRepository {
 
@@ -55,13 +57,15 @@ class QuizRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 🚀 STREAMING: Generate quiz with progress tracking.
-     * Note: If AIDataSource doesn't have streaming for quiz yet,
-     * this wraps the standard call in a flow for API consistency.
-     */
-    /**
-     * 🚀 STREAMING: Generate quiz with progress tracking.
-     * Collects from AIDataSource streaming and maps to repository progress states.
+     * Generate quiz questions grounded in the concept's existing flashcards.
+     *
+     * Each flashcard's front+back pair is a distinct, already-verified fact.
+     * We feed these as numbered facts into the prompt so the model writes one
+     * question per fact rather than rephrasing the same one-sentence description
+     * five times.
+     *
+     * If no flashcards exist yet (e.g. quiz generated before flashcard generation),
+     * we fall back to the concept description with questionCount capped at 1.
      */
     fun generateQuizForConceptStreaming(
         conceptId: String,
@@ -71,7 +75,18 @@ class QuizRepositoryImpl @Inject constructor(
     ): Flow<QuizGenerationProgress> = flow {
         emit(QuizGenerationProgress.Loading)
 
-        // Create quiz entity first (immediate feedback)
+        // Fetch existing flashcards for this concept — zero extra AI calls
+        val flashcards = flashcardLocalDataSource.getForConcept(conceptId)
+
+        // Build "Q: <front> | A: <back>" fact strings, capped at 3
+        val facts = flashcards
+            .take(3)
+            .map { "Q: ${it.front} | A: ${it.back}" }
+
+        // If no flashcards, don't ask for more questions than the description supports
+        val effectiveCount = if (facts.isEmpty()) 1 else facts.size
+
+        // Create quiz entity
         val quizId = UUID.randomUUID().toString()
         val quiz = Quiz(
             id = quizId,
@@ -82,29 +97,21 @@ class QuizRepositoryImpl @Inject constructor(
 
         emit(QuizGenerationProgress.CreatingQuiz(quiz))
 
-        // Collect from streaming data source
         var generatedQuestions: List<GeneratedQuizQuestion>? = null
 
         aiDataSource.generateQuizStreaming(
             conceptName = conceptName,
             conceptDescription = conceptDescription ?: "",
-            questionCount = questionCount
+            facts = facts,
+            questionCount = effectiveCount
         ).collect { state ->
             when (state) {
-                is QuizGenerationState.Loading -> {
-                    // Already emitted Loading above, can emit CreatingQuiz again if needed
-                    emit(QuizGenerationProgress.CreatingQuiz(quiz))
-                }
-                is QuizGenerationState.Generating -> {
-                    // Forward progress percentage
-                    emit(QuizGenerationProgress.Generating(state.percent))
-                }
-                is QuizGenerationState.Success -> {
-                    generatedQuestions = state.questions
-                }
-                is QuizGenerationState.Error -> {
+                is QuizGenerationState.Loading    -> emit(QuizGenerationProgress.CreatingQuiz(quiz))
+                is QuizGenerationState.Generating -> emit(QuizGenerationProgress.Generating(state.percent))
+                is QuizGenerationState.Success    -> generatedQuestions = state.questions
+                is QuizGenerationState.Error      -> {
                     emit(QuizGenerationProgress.Error(state.message))
-                    return@collect // Stop collecting on error
+                    return@collect
                 }
             }
         }

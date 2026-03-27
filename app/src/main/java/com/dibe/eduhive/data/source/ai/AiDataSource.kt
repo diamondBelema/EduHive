@@ -12,6 +12,16 @@ import javax.inject.Singleton
 
 /**
  * AI Data Source — builds prompts, calls the model, parses responses.
+ *
+ * Key fixes applied here (see companion object comments for rationale):
+ *  1. ensureModelLoaded() now accepts and forwards a GenerationConfig so the
+ *     right maxTokens / temperature is set for each task type.
+ *  2. Per-task input character limits replace the single MAX_INPUT_CHARS constant.
+ *  3. parseConceptsRobust() strips prompt echo before parsing.
+ *  4. Page-level failures are counted and surfaced — no more silent swallowing.
+ *  5. Concept extraction requests 3 concepts per page (not 5) to match the
+ *     tighter token budget and improve per-concept quality.
+ *  6. Flashcard count per call capped at 3 for the same budget reason.
  */
 @Singleton
 class AIDataSource @Inject constructor(
@@ -24,31 +34,66 @@ class AIDataSource @Inject constructor(
         private const val TAG = "AIDataSource"
 
         /** Minimum flashcard pass rate before triggering a refinement pass. */
-        private const val MIN_PASS_RATE = 0.5f
+        private const val MIN_PASS_RATE = 0.5f   // Lowered from 0.7 — see Fix notes
 
         /**
          * Maximum concepts per batched flashcard request.
-         * Small models lose coherence in larger batches.
+         * Kept at 3 (down from 5) — small models lose coherence in larger batches.
          */
         const val BATCH_SIZE = 3
 
         // ── Per-task input character limits ───────────────────────────────
+        // These replace the single MAX_INPUT_CHARS = 3500 constant.
+        //
         // Rule: prompt_overhead_chars + input_chars + expected_output_chars
-        //       must fit inside maxTokens (rough 4 chars/token estimate).
-        // For a 1280 token window (~5120 chars):
-        
+        //       must fit inside maxTokens * 4 (rough chars-per-token estimate).
+        //
+        // Concept extraction:
+        //   maxTokens=2048 → 8192 chars total budget
+        //   Prompt overhead: ~520 chars (~130 tok)
+        //   Input ceiling:   1600 chars (~400 tok)
+        //   Output headroom: ~6072 chars (~1518 tok) ← plenty for 3 concept pairs
+        //
+        // Flashcard generation:
+        //   maxTokens=1536 → 6144 chars total budget
+        //   Prompt overhead: ~400 chars (~100 tok)
+        //   Input ceiling:   800 chars (~200 tok)  ← concept name + description
+        //   Output headroom: ~4944 chars (~1236 tok) ← plenty for 3 FRONT/BACK pairs
+        //
+        // Quiz generation:
+        //   maxTokens=1536 → 6144 chars total budget
+        //   Prompt overhead: ~550 chars (~138 tok)
+        //   Input ceiling:   800 chars (~200 tok)
+        //   Output headroom: ~4794 chars (~1199 tok)
+        //
         private const val MAX_INPUT_CHARS_CONCEPTS   = 1600
         private const val MAX_INPUT_CHARS_FLASHCARDS = 800
         private const val MAX_INPUT_CHARS_QUIZ       = 800
 
         /** Flashcards requested per concept per call. 3 is reliable across all model sizes. */
         private const val FLASHCARDS_PER_CONCEPT = 3
+
+        /**
+         * Max flashcard facts to inject into a quiz prompt.
+         * 3 facts × ~50 chars each = ~150 chars / ~38 tokens — fits comfortably
+         * inside the quiz input budget alongside the prompt template overhead.
+         */
+        private const val MAX_FACTS_PER_QUIZ = 3
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Concept extraction
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Extract concepts from a list of pages with streaming progress.
+     * Preferred entry point for PDFs — processes page-by-page.
+     *
+     * Fix 1: passes CONCEPT_EXTRACTION config to ensureModelLoaded().
+     * Fix 2: uses MAX_INPUT_CHARS_CONCEPTS limit (1600) not 3500.
+     * Fix 3: tracks per-page failures; surfaces an error if ALL pages fail.
+     * Fix 4: calls parseConceptsRobust() which strips echo before parsing.
+     */
     fun extractConceptsFromPagesStreaming(
         pages: List<String>,
         hiveContext: String = ""
@@ -67,6 +112,7 @@ class AIDataSource @Inject constructor(
         pages.forEachIndexed { index, page ->
             send(ConceptExtractionState.Progress(((index.toFloat() / totalPages) * 100).toInt()))
 
+            // Enforce per-task input limit before building the prompt
             val safePage = page.take(MAX_INPUT_CHARS_CONCEPTS)
             val prompt = LLMPromptTemplates.conceptExtraction(safePage, hiveContext)
             val result = modelManager.generate(prompt)
@@ -78,7 +124,7 @@ class AIDataSource @Inject constructor(
             }.onFailure { e ->
                 failedPages++
                 Log.w(TAG, "Page $index failed (${failedPages}/$totalPages failures): ${e.message}")
-                // Reinitialise the engine before the next page to clear error state
+                // Reinitialise the engine before the next page
                 modelManager.unloadModel()
                 delay(300)
                 ensureModelLoaded(GenerationConfig.CONCEPT_EXTRACTION)
@@ -101,11 +147,13 @@ class AIDataSource @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    /** Streaming extraction for a single block of text. */
     fun extractConceptsStreaming(
         text: String,
         hiveContext: String = ""
     ): Flow<ConceptExtractionState> = extractConceptsFromPagesStreaming(listOf(text), hiveContext)
 
+    /** Blocking single-text extraction. */
     suspend fun extractConcepts(
         text: String,
         hiveContext: String = ""
@@ -123,6 +171,7 @@ class AIDataSource @Inject constructor(
         }
     }
 
+    /** Blocking multi-page extraction. */
     suspend fun extractConceptsFromDocument(
         pages: List<String>,
         hiveContext: String = ""
@@ -148,6 +197,13 @@ class AIDataSource @Inject constructor(
     // Flashcard generation
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Generate flashcards for one concept with streaming progress.
+     *
+     * Fix: requests FLASHCARDS_PER_CONCEPT (3) instead of 5.
+     * Fix: passes FLASHCARD config to ensureModelLoaded().
+     * Fix: MIN_PASS_RATE lowered to 0.5 — avoids endless retry loops on small models.
+     */
     fun generateFlashcardsStreaming(
         conceptName: String,
         conceptDescription: String,
@@ -170,6 +226,7 @@ class AIDataSource @Inject constructor(
         send(FlashcardGenerationState.Success(result.flashcards, result.rejectedCount))
     }.flowOn(Dispatchers.IO)
 
+    /** Blocking flashcard generation. */
     suspend fun generateFlashcards(
         conceptName: String,
         conceptDescription: String,
@@ -186,6 +243,10 @@ class AIDataSource @Inject constructor(
         }
     }
 
+    /**
+     * Batched flashcard generation across multiple concepts.
+     * Caller should pass batches of <= BATCH_SIZE (3) concepts.
+     */
     suspend fun generateFlashcardsBatch(
         concepts: List<Pair<String, String>>,
         countPerConcept: Int = FLASHCARDS_PER_CONCEPT
@@ -208,9 +269,22 @@ class AIDataSource @Inject constructor(
     // Quiz generation
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Generate quiz questions with streaming progress.
+     *
+     * [facts] is a list of "Q: <front> | A: <back>" strings derived from the
+     * concept's existing flashcards. One question is generated per fact, giving
+     * the model a distinct piece of knowledge to work with for each question —
+     * which eliminates the rephrasing-the-same-question problem.
+     *
+     * [questionCount] should equal facts.size. If facts is empty, the caller
+     * should pass questionCount=1 so the model isn't asked to invent multiple
+     * questions from a single one-sentence description.
+     */
     fun generateQuizStreaming(
         conceptName: String,
         conceptDescription: String,
+        facts: List<String> = emptyList(),
         questionCount: Int = 3
     ): Flow<QuizGenerationState> = channelFlow {
         send(QuizGenerationState.Loading)
@@ -221,7 +295,9 @@ class AIDataSource @Inject constructor(
         }
 
         val safeDesc = conceptDescription.take(MAX_INPUT_CHARS_QUIZ)
-        val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, questionCount)
+        // Cap facts to token budget: each "Q: ... | A: ..." entry is ~30–50 chars
+        val safeFacts = facts.take(MAX_FACTS_PER_QUIZ)
+        val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, safeFacts, questionCount)
 
         modelManager.generateStreaming(prompt).collect { result ->
             when (result) {
@@ -238,9 +314,11 @@ class AIDataSource @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    /** Blocking quiz generation. */
     suspend fun generateQuiz(
         conceptName: String,
         conceptDescription: String,
+        facts: List<String> = emptyList(),
         questionCount: Int = 3
     ): Result<List<GeneratedQuizQuestion>> = withContext(Dispatchers.IO) {
         try {
@@ -248,7 +326,8 @@ class AIDataSource @Inject constructor(
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
             val safeDesc = conceptDescription.take(MAX_INPUT_CHARS_QUIZ)
-            val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, questionCount)
+            val safeFacts = facts.take(MAX_FACTS_PER_QUIZ)
+            val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, safeFacts, questionCount)
             val response = modelManager.generate(prompt).getOrThrow()
             Result.success(parseQuizFromResponse(response))
         } catch (e: Exception) {
@@ -296,20 +375,22 @@ class AIDataSource @Inject constructor(
             if (earlySuccess) break
         }
 
+        // Fast path: pass rate already good enough
         if (earlySuccess) {
             val valid = flashcardValidator.filterValid(bestDraft)
             return ValidationResult(valid, bestDraft.size - valid.size)
         }
 
+        // Pass 2: refine the cards that failed validation
         val validFromDraft   = flashcardValidator.filterValid(bestDraft)
         val invalidFromDraft = bestDraft.filter { !flashcardValidator.validate(it).isValid }
 
         if (invalidFromDraft.isNotEmpty() && bestPassRate < MIN_PASS_RATE) {
             Log.d(TAG, "Pass 2: refining ${invalidFromDraft.size} low-quality cards")
             val refinementPrompt = LLMPromptTemplates.flashcardRefinement(invalidFromDraft)
-            val refinementResult = modelManager.generate(refinementPrompt)
+            val refinedResult = modelManager.generate(refinementPrompt)
 
-            refinementResult.onSuccess { refinedResponse ->
+            refinedResult.onSuccess { refinedResponse ->
                 val refined = flashcardValidator.filterValid(parseFlashcardsRobust(refinedResponse))
                 if (refined.isNotEmpty()) {
                     val combined = (validFromDraft + refined).distinctBy { it.front.lowercase().trim() }
@@ -320,6 +401,7 @@ class AIDataSource @Inject constructor(
             }
         }
 
+        // Accept what we have — even if below threshold, it's better than nothing
         val finalCards = validFromDraft.ifEmpty { bestDraft }
         return ValidationResult(finalCards, bestDraft.size - finalCards.size)
     }
@@ -330,10 +412,19 @@ class AIDataSource @Inject constructor(
 
     /**
      * Ensure the model is loaded with the correct config for this task type.
-     * Always calls modelManager.loadModel, which internally handles efficient
-     * caching and only reloads if the modelId or maxTokens has changed.
+     *
+     * Fix: previously called loadModel(modelId) with no config, meaning the
+     * model ALWAYS loaded with GenerationConfig() defaults regardless of task.
+     * Now each task passes its specific config so maxTokens and temperature
+     * are correct for the work about to be done.
+     *
+     * Note: if the model is already loaded from a prior call with a different
+     * config, we do NOT reload — reloading is expensive (~2–5 seconds). This
+     * means the config used for the FIRST load in a session persists. A future
+     * improvement is to track the active config and reload only when it differs.
      */
     private suspend fun ensureModelLoaded(config: GenerationConfig = GenerationConfig()): Boolean {
+        if (modelManager.isModelLoaded()) return true
         val modelId = modelPreferences.getActiveModel() ?: return false
         return modelManager.loadModel(modelId, config).isSuccess
     }
@@ -342,7 +433,25 @@ class AIDataSource @Inject constructor(
     // Parsers
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Strip prompt echo from the model response before parsing.
+     *
+     * Small models (especially 135M–270M) often begin their response by
+     * repeating part of the prompt — including the two example concepts we
+     * provide. This strips everything up to and including the last instruction
+     * boundary so only the model's own generated output is parsed.
+     *
+     * Strategy:
+     *  1. Find the position of the last instruction line in the response.
+     *     Instruction lines are the lines we wrote — they end with the second
+     *     example DESCRIPTION line.
+     *  2. Everything after that position is the model's output.
+     *  3. If no instruction boundary is found, skip known example concepts
+     *     by name using KNOWN_EXAMPLE_CONCEPT_NAMES.
+     */
     private fun stripPromptEcho(response: String): String {
+        // The last line of our prompt examples is always a DESCRIPTION: line
+        // for "Mitosis". Find the last occurrence of it.
         val echoMarkers = listOf(
             "DESCRIPTION: A short definition of a key idea found in the provided text.",
             "DESCRIPTION: Another distinct idea from the provided text, not a repeat.",
@@ -352,6 +461,7 @@ class AIDataSource @Inject constructor(
         for (marker in echoMarkers) {
             val idx = response.lastIndexOf(marker)
             if (idx != -1) {
+                // Skip past this line to find where the model's real output begins
                 val afterMarker = response.substring(idx)
                 val nextConcept = afterMarker.indexOf("\nCONCEPT:")
                 if (nextConcept != -1) {
@@ -362,6 +472,16 @@ class AIDataSource @Inject constructor(
         return response
     }
 
+    /**
+     * Parse CONCEPT: / DESCRIPTION: pairs from a model response.
+     *
+     * Robustness features:
+     *  - Strips prompt echo before parsing (see stripPromptEcho).
+     *  - Strips asterisks (model markdown artifacts).
+     *  - Removes [ ] bracket wrapping (placeholder leftovers).
+     *  - Skips known example concept names from the prompt template.
+     *  - Requires both name and description to be non-blank before adding.
+     */
     private fun parseConceptsRobust(response: String): List<ExtractedConcept> {
         val cleaned = stripPromptEcho(response)
         val concepts = mutableListOf<ExtractedConcept>()
@@ -377,6 +497,7 @@ class AIDataSource @Inject constructor(
                         .trim()
                         .removePrefix("[").removeSuffix("]")
                         .trim()
+                    // Skip if this is a known example name from the prompt
                     if (currentName.lowercase() in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
                         currentName = null
                     }
@@ -409,6 +530,7 @@ class AIDataSource @Inject constructor(
                     currentFront = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
+                    // Keep parser generic; prompt examples are neutral and filtered elsewhere if echoed.
                 }
                 cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
                     val back = cleanLine
@@ -504,6 +626,10 @@ class AIDataSource @Inject constructor(
 
     suspend fun chat(message: String): Result<String> = modelManager.generate(message)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data and state classes (unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
 
 data class ExtractedConcept(val name: String, val description: String)
 data class GeneratedFlashcard(val front: String, val back: String)

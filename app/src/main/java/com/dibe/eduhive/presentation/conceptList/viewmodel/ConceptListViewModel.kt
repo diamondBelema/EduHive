@@ -129,7 +129,7 @@ class ConceptListViewModel @Inject constructor(
                             conceptId = concept.id,
                             conceptName = concept.name,
                             conceptDescription = concept.description,
-                            questionCount = 5
+                            questionCount = 3
                         )
                         generatedQuizPairs.add(result)
                     }

@@ -103,44 +103,51 @@ $cardsBlock
     // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * Generate quiz questions for a single concept.
+     * Generate quiz questions grounded in existing flashcard facts.
      *
-     * Why we show both MCQ and TRUE_FALSE examples:
-     * Without seeing both formats, small models default to producing only MCQ.
-     * Showing one of each primes them to alternate — which gives more variety
-     * and a better quiz experience.
+     * [facts] is a list of "Q: <front> | A: <back>" strings built from the
+     * concept's existing flashcards. Each fact is a distinct piece of knowledge,
+     * so each question the model produces is forced to cover something different.
+     * This eliminates the duplicate-question problem that occurs when the model
+     * is asked to generate 5 questions from a single one-sentence description.
      *
-     * The prompt ends after the second complete example block (TRUE_FALSE),
-     * which primes the model to continue writing QUESTION 1.
+     * If no flashcards exist yet, [facts] is empty and we fall back to the
+     * concept description, capped at count=1 by the caller.
      */
-    fun quizGeneration(conceptName: String, conceptDescription: String, count: Int): String {
+    fun quizGeneration(
+        conceptName: String,
+        conceptDescription: String,
+        facts: List<String>,
+        count: Int
+    ): String {
+        val factsBlock = if (facts.isNotEmpty()) {
+            "Write one question based on each of these facts:\n" +
+                    facts.mapIndexed { i, f -> "${i + 1}. $f" }.joinToString("\n")
+        } else {
+            "Context: $conceptDescription"
+        }
+
         return """
-Create $count distinct and challenging quiz questions about: $conceptName
-Context: $conceptDescription
+Create $count quiz questions about: $conceptName
+$factsBlock
 
-VARIETY IS KEY:
-- Use different question types (MCQ, TRUE_FALSE).
-- Ask about different details (definitions, relationships, implications).
-- DO NOT repeat the same fact across multiple questions.
-- Distractors (wrong options) should be plausible but clearly incorrect.
-
-MCQ format:
+MCQ format — options must be real answer choices, not labels:
 QUESTION 1
 TYPE: MCQ
-TEXT: Which statement best describes $conceptName?
-OPTION A: Answer A
-OPTION B: Answer B
-OPTION C: Answer C
-OPTION D: Answer D
-CORRECT: A
+TEXT: What is the primary site of ATP production in a cell?
+OPTION A: The nucleus
+OPTION B: The mitochondria
+OPTION C: The ribosome
+OPTION D: The cell membrane
+CORRECT: B
 
-TRUE/FALSE format:
+TRUE_FALSE format:
 QUESTION 2
 TYPE: TRUE_FALSE
-TEXT: This statement about $conceptName is correct.
+TEXT: The mitochondria is found only in plant cells.
 OPTION A: True
 OPTION B: False
-CORRECT: A
+CORRECT: B
         """.trimIndent()
     }
 
