@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.dibe.eduhive.workers.NotificationHelper
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
@@ -32,6 +33,9 @@ class EduHiveApplication : Application(), Configuration.Provider {
 
         // Initialize PDFBox
         PDFBoxResourceLoader.init(this)
+
+        // Initialize Notifications
+        NotificationHelper.createNotificationChannel(this)
 
         Log.d(TAG, "✅ EduHive initialized successfully")
     }

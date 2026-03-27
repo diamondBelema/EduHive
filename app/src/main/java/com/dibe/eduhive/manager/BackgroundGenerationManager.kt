@@ -1,11 +1,13 @@
 package com.dibe.eduhive.manager
 
+import android.net.Uri
 import androidx.work.BackoffPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkRequest
 import androidx.work.workDataOf
 import com.dibe.eduhive.workers.FlashcardGenerationWorker
+import com.dibe.eduhive.workers.MaterialProcessingWorker
 import com.dibe.eduhive.workers.QuizGenerationWorker
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -13,7 +15,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Orchestrates scheduling of background flashcard and quiz generation tasks.
+ * Orchestrates scheduling of background flashcard, quiz, and material generation tasks.
  *
  * Uses WorkManager so tasks survive app restarts and benefit from automatic
  * retry with exponential backoff.
@@ -24,9 +26,37 @@ class BackgroundGenerationManager @Inject constructor(
 ) {
 
     /**
+     * Schedules a background task to process new educational material.
+     */
+    fun scheduleMaterialProcessing(
+        uri: Uri,
+        hiveId: String,
+        title: String,
+        hiveContext: String = ""
+    ): UUID {
+        val workRequest = OneTimeWorkRequestBuilder<MaterialProcessingWorker>()
+            .setInputData(
+                workDataOf(
+                    MaterialProcessingWorker.KEY_URI to uri.toString(),
+                    MaterialProcessingWorker.KEY_HIVE_ID to hiveId,
+                    MaterialProcessingWorker.KEY_TITLE to title,
+                    MaterialProcessingWorker.KEY_HIVE_CONTEXT to hiveContext
+                )
+            )
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                WorkRequest.MIN_BACKOFF_MILLIS,
+                TimeUnit.MILLISECONDS
+            )
+            .addTag("material_processing")
+            .build()
+
+        workManager.enqueue(workRequest)
+        return workRequest.id
+    }
+
+    /**
      * Schedules a background flashcard generation task for the given concepts.
-     *
-     * @return The unique [UUID] of the enqueued [WorkRequest], used to observe progress.
      */
     fun scheduleFlashcardGeneration(hiveId: String, conceptIds: List<String>): UUID {
         val workRequest = OneTimeWorkRequestBuilder<FlashcardGenerationWorker>()
@@ -41,6 +71,7 @@ class BackgroundGenerationManager @Inject constructor(
                 WorkRequest.MIN_BACKOFF_MILLIS,
                 TimeUnit.MILLISECONDS
             )
+            .addTag("flashcard_generation")
             .build()
 
         workManager.enqueue(workRequest)
@@ -49,8 +80,6 @@ class BackgroundGenerationManager @Inject constructor(
 
     /**
      * Schedules a background quiz generation task for the given concepts.
-     *
-     * @return The unique [UUID] of the enqueued [WorkRequest], used to observe progress.
      */
     fun scheduleQuizGeneration(hiveId: String, conceptIds: List<String>): UUID {
         val workRequest = OneTimeWorkRequestBuilder<QuizGenerationWorker>()
@@ -65,6 +94,7 @@ class BackgroundGenerationManager @Inject constructor(
                 WorkRequest.MIN_BACKOFF_MILLIS,
                 TimeUnit.MILLISECONDS
             )
+            .addTag("quiz_generation")
             .build()
 
         workManager.enqueue(workRequest)

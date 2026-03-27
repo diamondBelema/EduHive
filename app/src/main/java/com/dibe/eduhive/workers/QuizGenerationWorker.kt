@@ -3,6 +3,7 @@ package com.dibe.eduhive.workers
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.dibe.eduhive.domain.repository.ConceptRepository
@@ -12,7 +13,7 @@ import dagger.assisted.AssistedInject
 
 @HiltWorker
 class QuizGenerationWorker @AssistedInject constructor(
-    @Assisted context: Context,
+    @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
     private val quizRepository: QuizRepository,
     private val conceptRepository: ConceptRepository
@@ -24,6 +25,9 @@ class QuizGenerationWorker @AssistedInject constructor(
         val hiveId = inputData.getString(KEY_HIVE_ID)
             ?: return Result.failure(workDataOf(KEY_ERROR to "Missing hiveId"))
 
+        // Show foreground notification
+        setForeground(createForegroundInfo(0, conceptIds.size))
+
         return try {
             val total = conceptIds.size
             setProgress(workDataOf(KEY_COMPLETED to 0, KEY_TOTAL to total))
@@ -31,6 +35,9 @@ class QuizGenerationWorker @AssistedInject constructor(
             var completed = 0
             for (conceptId in conceptIds) {
                 val concept = conceptRepository.getConceptById(conceptId) ?: continue
+
+                // Update notification for current progress
+                setForeground(createForegroundInfo(completed, total, concept.name))
 
                 quizRepository.generateQuizForConcept(
                     conceptId = conceptId,
@@ -51,6 +58,22 @@ class QuizGenerationWorker @AssistedInject constructor(
                 Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Quiz generation failed")))
             }
         }
+    }
+
+    private fun createForegroundInfo(completed: Int, total: Int, currentConcept: String? = null): ForegroundInfo {
+        val content = if (currentConcept != null) {
+            "Generating quiz for: $currentConcept ($completed/$total)"
+        } else {
+            "Generating quizzes... ($completed/$total)"
+        }
+
+        val notification = NotificationHelper.getBaseNotification(
+            context,
+            "Study Hive: Quiz Generation",
+            content
+        ).setProgress(total, completed, false).build()
+
+        return ForegroundInfo(NotificationHelper.NOTIFICATION_ID, notification)
     }
 
     companion object {
