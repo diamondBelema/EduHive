@@ -12,63 +12,79 @@ object LLMPromptTemplates {
         "example concept b"
     )
 
+    private val TEACHER_PERSONA = """
+        You are an elite Academic Tutor specializing in active recall and spaced repetition. 
+        Your goal is to help students truly understand complex logic, not just memorize definitions.
+        You write in a clear, professional, and intellectually stimulating tone.
+        ---
+    """.trimIndent()
+
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-Extract up to 10 unique and distinct concepts from the text below.
-Avoid overlapping or repetitive ideas. Focus on core terminology and logic.
+Extract 5–10 HIGH-VALUE concepts from the text.
+
+STRICT RULES:
+- Each concept must be specific and testable (not broad topics like "exercise" or "health")
+- Prefer mechanisms, processes, relationships, or definitions
+- Avoid vague or generic terms
+- Avoid overlapping concepts
+
 $contextLine
 Text:
 $text
 
-Output format:
-CONCEPT: Example Concept A
-DESCRIPTION: A short definition of a key idea found in the provided text.
+GOOD EXAMPLES:
+CONCEPT: Muscle hypertrophy
+DESCRIPTION: Increase in muscle size due to resistance training.
 
-CONCEPT: Example Concept B
-DESCRIPTION: Another distinct idea from the provided text, not a repeat.
-        """.trimIndent()
+CONCEPT: Osmosis
+DESCRIPTION: Movement of water across a semi-permeable membrane.
+
+BAD EXAMPLES:
+CONCEPT: Exercise
+CONCEPT: Health
+
+Output format:
+CONCEPT: ...
+DESCRIPTION: ...
+    """.trimIndent()
     }
 
     fun flashcardDraft(conceptName: String, conceptDescription: String, count: Int): String {
-        return """
-Create $count high-quality flashcards for the concept below.
-
-Concept: $conceptName
+        val basePrompt = """
+Create $count unique, challenging flashcards for the concept: $conceptName
 Context: $conceptDescription
 
-STRICT RULES:
-- Do NOT use generic questions like:
-  "What is...", "Why is ... important?", "What is the main idea..."
-- Each question must reference a SPECIFIC detail, mechanism, example, or implication.
-- Each card must test a DIFFERENT cognitive angle:
-  (definition, mechanism, example, comparison, application, edge case)
-- Questions must NOT be reusable for other topics.
-- Answers must be precise and directly derived from the context.
+GOAL: 
+Create "Active Recall" cards. The front must be a specific question or scenario, and the back must be a concise, complete explanation.
 
-BAD EXAMPLES (DO NOT COPY):
-FRONT: What is $conceptName?
-BACK: It is...
+STRICT RULES FOR THE FRONT (The Question):
+- NEVER use single words like "Mechanism", "Application", or "Definition".
+- Use "Scenario-based" prompts: "A manager is faced with X; how does $conceptName apply?"
+- Use "Comparison" prompts: "How does $conceptName differ from its closest alternative?"
+- Use "Functional" prompts: "What specific problem does $conceptName solve in a real-world system?"
+- Use "Consequence" prompts: "What happens if $conceptName is ignored or performed incorrectly?"
 
-FRONT: Why is $conceptName important?
-BACK: It is important because...
+STRICT RULES FOR THE BACK (The Answer):
+- Must be a full, standalone sentence.
+- Do not just define the word; explain the *logic* behind the answer.
+- Keep it "bite-sized" but information-dense.
 
-GOOD EXAMPLES:
-FRONT: What specific role does "$conceptName" play in [contextual mechanism]?
-BACK: It functions by...
+BAD EXAMPLE (Avoid these):
+FRONT: Application
+BACK: Applying the process to a task.
 
-FRONT: In what situation would "$conceptName" fail or not apply?
-BACK: It fails when...
-
-FRONT: How does "$conceptName" differ from a closely related idea?
-BACK: Unlike..., it...
-
-Now generate the flashcards.
+GOOD EXAMPLE:
+FRONT: In a high-pressure environment, why might $conceptName lead to 'analysis paralysis'?
+BACK: It occurs when the complexity of the decision-making process outweighs the time available, causing a total stall in action.
 
 Output format:
-FRONT: ...
-BACK: ...
-    """.trimIndent()
+FRONT: [Specific Question]
+BACK: [Detailed Answer]
+""".trimIndent()
+
+        return "$TEACHER_PERSONA\n$basePrompt"
     }
 
     /**
@@ -89,18 +105,21 @@ BACK: ...
         }.joinToString("\n")
 
         return """
-Create $countPerConcept flashcards for each of these ${concepts.size} concepts:
+Generate $countPerConcept high-quality flashcards for each of the following $concepts.size concepts:
+
 $conceptsBlock
 
-Tag each card with its concept number. Output format:
-CONCEPT: 1
-FRONT: What is the main idea of concept 1?
-BACK: One concise answer derived from concept 1.
+STRICT QUALITY CHECK:
+1. Every FRONT must be a complete, inquisitive question (e.g., "Under what conditions...", "How does...", "Why is...")
+2. NO one-word fronts.
+3. NO repetitive structures. 
+4. If the concept is mitochondria for example, the question must mention the concept or a specific situation where it applies.
 
-CONCEPT: 2
-FRONT: Why does concept 2 matter?
-BACK: One concise reason derived from concept 2.
-        """.trimIndent()
+Output format:
+CONCEPT: [Number]
+FRONT: [Complete Question]
+BACK: [Complete Answer]
+""".trimIndent()
     }
 
     /**
@@ -114,12 +133,23 @@ BACK: One concise reason derived from concept 2.
         val cardsBlock = draftFlashcards.joinToString("\n\n") { card ->
             "FRONT: ${card.front}\nBACK: ${card.back}"
         }
+
         return """
-Rewrite these flashcards. Make each question specific and each answer a complete sentence.
-Keep the same FRONT/BACK format and the same number of cards.
+Rewrite these flashcards to improve quality.
+
+STRICT RULES:
+- Replace ALL generic questions
+- Remove repeated sentence patterns
+- Make each question specific and unique
+- Ensure each card tests a different idea
+- Improve clarity and precision of answers
 
 $cardsBlock
-        """.trimIndent()
+
+Output format:
+FRONT: ...
+BACK: ...
+    """.trimIndent()
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -192,9 +222,9 @@ Now continue with QUESTION 1.
 
     fun mutate(basePrompt: String, attempt: Int): String {
         val suffix = when (attempt) {
-            0    -> ""
-            1    -> "\nFocus on high-level architecture and abstract logic."
-            else -> "\nFocus on granular details and specific edge cases."
+            0 -> ""
+            1 -> "\nFocus more on real-world applications and practical scenarios."
+            else -> "\nFocus on edge cases, exceptions, and subtle differences between related ideas."
         }
         return basePrompt + suffix
     }
