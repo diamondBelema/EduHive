@@ -100,6 +100,7 @@ fun GlobalTaskOverlay(
                     Surface(
                         color = MaterialTheme.colorScheme.primary,
                         shape = CircleShape
+
                     ) {
                         Text(
                             text = "+${activeTasks.size - 1}",
