@@ -8,7 +8,7 @@ package com.dibe.eduhive.data.source.ai
  * 1. Examples ARE the instruction.
  *    Small models pattern-match to concrete examples far better than they follow
  *    prose rules. Show exactly what you want — twice. Never use placeholders like
- *    [name] because the model will output the literal word "name".
+ *    "name" because the model will output the literal token.
  *
  * 2. One task per prompt.
  *    Never ask the model to analyse AND format in the same call. The prompt either
@@ -37,10 +37,8 @@ object LLMPromptTemplates {
     // These are the concept names used in our prompt examples. If the model
     // echoes them back, the parser will skip them as known-example noise.
     val KNOWN_EXAMPLE_CONCEPT_NAMES = setOf(
-        "photosynthesis",
-        "mitosis",
-        "mitochondria",   // flashcard example
-        "natural selection" // quiz example
+        "example concept a",
+        "example concept b"
     )
 
     // ────────────────────────────────────────────────────────────────────────
@@ -61,7 +59,7 @@ object LLMPromptTemplates {
      * Why two examples and no placeholders:
      * - One example gives the model a pattern to copy once.
      * - Two examples confirms the pattern — the model sees it is not a one-off.
-     * - Placeholders ([name], [description]) get copied verbatim by small models.
+         * - Placeholders such as "name" and "description" get copied verbatim by small models.
      *
      * The prompt ends immediately after the second example's DESCRIPTION line.
      * This primes the model to continue writing a third CONCEPT: block rather
@@ -70,17 +68,17 @@ object LLMPromptTemplates {
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-Extract 3 key concepts from the text below.
+Extract up to 10 specific concepts from the text below.
 ${contextLine}
 Text:
 $text
 
 Output format:
-CONCEPT: Photosynthesis
-DESCRIPTION: The process by which plants use sunlight to convert carbon dioxide and water into glucose.
+CONCEPT: Example Concept A
+DESCRIPTION: A short definition of a key idea found in the provided text.
 
-CONCEPT: Mitosis
-DESCRIPTION: Cell division that produces two genetically identical daughter cells from one parent cell.
+CONCEPT: Example Concept B
+DESCRIPTION: Another distinct idea from the provided text, not a repeat.
         """.trimIndent()
         // Intentionally ends here — model continues with the next CONCEPT: block
     }
@@ -105,11 +103,11 @@ Create $count flashcards for: $conceptName
 Context: $conceptDescription
 
 Output format:
-FRONT: What does the mitochondria produce?
-BACK: ATP, the primary energy currency used by cells.
+FRONT: What is the main idea of "$conceptName"?
+BACK: The main idea is: [one clear sentence based only on the provided concept context].
 
-FRONT: Where does the mitochondria get its energy from?
-BACK: From glucose molecules broken down during cellular respiration.
+FRONT: Why is "$conceptName" important?
+BACK: It is important because: [one specific reason grounded in the provided context].
         """.trimIndent()
     }
 
@@ -136,12 +134,12 @@ $conceptsBlock
 
 Tag each card with its concept number. Output format:
 CONCEPT: 1
-FRONT: What does the mitochondria produce?
-BACK: ATP, the primary energy currency used by cells.
+FRONT: What is the main idea of concept 1?
+BACK: One concise answer derived from concept 1.
 
 CONCEPT: 2
-FRONT: What triggers natural selection?
-BACK: Environmental pressures that make certain traits more advantageous for survival.
+FRONT: Why does concept 2 matter?
+BACK: One concise reason derived from concept 2.
         """.trimIndent()
     }
 
@@ -187,17 +185,17 @@ Context: $conceptDescription
 MCQ format:
 QUESTION 1
 TYPE: MCQ
-TEXT: What is the primary output of the mitochondria?
-OPTION A: Glucose
-OPTION B: ATP
-OPTION C: Oxygen
-OPTION D: Carbon dioxide
-CORRECT: B
+TEXT: Which statement best describes $conceptName?
+OPTION A: Answer A
+OPTION B: Answer B
+OPTION C: Answer C
+OPTION D: Answer D
+CORRECT: A
 
 TRUE/FALSE format:
 QUESTION 2
 TYPE: TRUE_FALSE
-TEXT: The mitochondria produces ATP through cellular respiration.
+TEXT: This statement about $conceptName is correct.
 OPTION A: True
 OPTION B: False
 CORRECT: A

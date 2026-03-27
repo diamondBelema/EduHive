@@ -26,6 +26,7 @@ class GetDashboardOverviewUseCase @Inject constructor(
         return try {
             // Get all concepts for the hive
             val concepts = conceptRepository.getConceptsForHive(hiveId)
+            val conceptIds = concepts.map { it.id }.toSet()
 
             // Calculate average confidence
             val averageConfidence = conceptRepository.getAverageConfidence(hiveId) ?: 0.0
@@ -34,7 +35,11 @@ class GetDashboardOverviewUseCase @Inject constructor(
             val weakConcepts = conceptRepository.getWeakestConcepts(hiveId, limit = 5)
 
             // Get due flashcards count
-            val dueFlashcards = flashcardRepository.getDueFlashcards(maxBox = 5, limit = 100)
+            val dueFlashcards = flashcardRepository.getDueFlashcards(
+                maxBox = 5,
+                limit = 100,
+                hiveId = hiveId
+            )
 
             // Get materials count
             val materials = materialRepository.getMaterialsForHive(hiveId)
@@ -44,7 +49,7 @@ class GetDashboardOverviewUseCase @Inject constructor(
             val recentEvents = reviewEventRepository.getEventsInRange(
                 startTime = sevenDaysAgo,
                 endTime = System.currentTimeMillis()
-            )
+            ).filter { event -> event.conceptId in conceptIds }
 
             // Calculate mastery distribution
             val masteryDistribution = MasteryDistribution(

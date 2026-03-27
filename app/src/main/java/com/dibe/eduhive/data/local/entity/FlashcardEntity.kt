@@ -51,14 +51,14 @@ private fun calculateNextReview(box: Int, lastSeen: Long?): Long? {
     if (lastSeen == null) return null
 
     val daysToAdd = when (box) {
-        1 -> 1
-        2 -> 3
-        3 -> 7
-        4 -> 14
-        5 -> 30
-        else -> 1
+        1 -> 1L
+        2 -> 3L
+        3 -> 7L
+        4 -> 14L
+        5 -> 30L
+        else -> 1L
     }
 
-    return lastSeen + (daysToAdd * 24 * 60 * 60 * 1000)
+    return lastSeen + (daysToAdd * 24L * 60L * 60L * 1000L)
 }
 

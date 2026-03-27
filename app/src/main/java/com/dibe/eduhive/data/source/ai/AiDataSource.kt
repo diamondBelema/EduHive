@@ -430,10 +430,10 @@ class AIDataSource @Inject constructor(
         // The last line of our prompt examples is always a DESCRIPTION: line
         // for "Mitosis". Find the last occurrence of it.
         val echoMarkers = listOf(
-            "DESCRIPTION: Cell division that produces two genetically identical",
-            "DESCRIPTION: The process by which plants use sunlight",
+            "DESCRIPTION: A short definition of a key idea found in the provided text.",
+            "DESCRIPTION: Another distinct idea from the provided text, not a repeat.",
             "Output format:",
-            "Now extract"
+            "Extract up to 10 specific concepts"
         )
         for (marker in echoMarkers) {
             val idx = response.lastIndexOf(marker)
@@ -507,10 +507,7 @@ class AIDataSource @Inject constructor(
                     currentFront = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
-                    // Skip known example fronts
-                    if (currentFront.lowercase().contains("mitochondria produce")) {
-                        currentFront = null
-                    }
+                    // Keep parser generic; prompt examples are neutral and filtered elsewhere if echoed.
                 }
                 cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
                     val back = cleanLine

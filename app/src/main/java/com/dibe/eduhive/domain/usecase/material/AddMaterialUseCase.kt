@@ -124,7 +124,7 @@ class AddMaterialUseCase @Inject constructor(
                     conceptId = concept.id,
                     conceptName = concept.name,
                     conceptDescription = concept.description ?: "",
-                    count = 5
+                    count = 3
                 ).collect { progress ->
                     when (progress) {
                         is FlashcardGenerationProgress.Retrying -> {

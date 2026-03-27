@@ -14,7 +14,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.dibe.eduhive.presentation.settings.viewmodel.ModelSettingsInfo
 import com.dibe.eduhive.presentation.settings.viewmodel.SettingsEvent
+import com.dibe.eduhive.presentation.settings.viewmodel.SettingsMessage
 import com.dibe.eduhive.presentation.settings.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -24,6 +26,17 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showClearCacheDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        when (message) {
+            is SettingsMessage.Success -> snackbarHostState.showSnackbar(message.text)
+            is SettingsMessage.Error -> snackbarHostState.showSnackbar(message.text)
+        }
+        viewModel.onEvent(SettingsEvent.DismissMessage)
+    }
 
     Scaffold(
         topBar = {
@@ -35,7 +48,8 @@ fun SettingsScreen(
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -46,15 +60,35 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             SettingsSectionHeader(title = "AI Intelligence", icon = Icons.Rounded.Memory)
+
+            if (state.isBusy && state.downloadStatus != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            state.downloadStatus ?: "Working...",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        if (state.downloadProgress > 0f) {
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(progress = { state.downloadProgress }, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
             
             // Model Selection
             state.availableModels.forEach { model ->
                 ModelSelectionCard(
-                    name = model.name,
-                    description = model.description,
-                    isDownloaded = model.isDownloaded,
+                    model = model,
                     isActive = model.id == state.activeModelId,
-                    onSelect = { viewModel.onEvent(SettingsEvent.SelectModel(model.id)) }
+                    isBusy = state.isBusy && state.busyModelId == model.id,
+                    onSelect = { viewModel.onEvent(SettingsEvent.SelectModel(model.id)) },
+                    enabled = !state.isBusy
                 )
             }
 
@@ -67,23 +101,72 @@ fun SettingsScreen(
                 subtitle = "Allow model downloads over cellular networks",
                 icon = Icons.Rounded.DataUsage,
                 checked = state.useMobileData,
+                enabled = !state.isBusy,
                 onCheckedChange = { viewModel.onEvent(SettingsEvent.ToggleMobileData(it)) }
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingsSectionHeader(title = "Advanced", icon = Icons.Rounded.SettingsSuggest)
-            
-            OutlinedButton(
-                onClick = { viewModel.onEvent(SettingsEvent.ClearCache) },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+
+            Surface(
                 shape = MaterialTheme.shapes.large,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Rounded.DeleteSweep, contentDescription = null)
-                Spacer(Modifier.width(12.dp))
-                Text("Clear AI Cache & Models")
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        "Developer Tools",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    OutlinedButton(
+                        onClick = { showClearCacheDialog = true },
+                        enabled = !state.isBusy,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = MaterialTheme.shapes.large,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Rounded.DeleteSweep, contentDescription = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Clear AI Cache & Models")
+                    }
+
+                    OutlinedButton(
+                        onClick = { viewModel.onEvent(SettingsEvent.ResetSetupOnNextLaunch) },
+                        enabled = !state.isBusy,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) {
+                        Icon(Icons.Rounded.RestartAlt, contentDescription = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Show Setup Wizard On Next Launch")
+                    }
+                }
             }
+        }
+
+        if (showClearCacheDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearCacheDialog = false },
+                title = { Text("Clear AI Cache?") },
+                text = {
+                    Text("This removes downloaded model files and unloads the active model. You can download again from this screen.")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showClearCacheDialog = false
+                            viewModel.onEvent(SettingsEvent.ClearCache)
+                        }
+                    ) { Text("Clear") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearCacheDialog = false }) { Text("Cancel") }
+                }
+            )
         }
     }
 }
@@ -104,15 +187,16 @@ fun SettingsSectionHeader(title: String, icon: ImageVector) {
 
 @Composable
 fun ModelSelectionCard(
-    name: String,
-    description: String,
-    isDownloaded: Boolean,
+    model: ModelSettingsInfo,
     isActive: Boolean,
-    onSelect: () -> Unit
+    isBusy: Boolean,
+    onSelect: () -> Unit,
+    enabled: Boolean
 ) {
     ElevatedCard(
         onClick = onSelect,
         modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.elevatedCardColors(
             containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
@@ -123,13 +207,26 @@ fun ModelSelectionCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(description, style = MaterialTheme.typography.bodyMedium)
+                Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(6.dp) ) {
+                    if (model.isRecommended) {
+                        AssistChip(onClick = {}, enabled = false, label = { Text("Recommended") })
+                    }
+                    Text(model.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                }
+                Text(model.description, style = MaterialTheme.typography.bodyMedium)
+                Text(model.sizeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (isActive) {
+
+            when {
+                isBusy -> {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                }
+                isActive -> {
                 Icon(Icons.Rounded.CheckCircle, contentDescription = "Active", tint = MaterialTheme.colorScheme.primary)
-            } else if (!isDownloaded) {
+                }
+                !model.isDownloaded -> {
                 Icon(Icons.Rounded.Download, contentDescription = "Download required", tint = MaterialTheme.colorScheme.outline)
+                }
             }
         }
     }
@@ -141,10 +238,11 @@ fun SettingsToggleRow(
     subtitle: String,
     icon: ImageVector,
     checked: Boolean,
+    enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Surface(
-        onClick = { onCheckedChange(!checked) },
+        onClick = { if (enabled) onCheckedChange(!checked) },
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
     ) {
@@ -158,7 +256,7 @@ fun SettingsToggleRow(
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         }
     }
 }

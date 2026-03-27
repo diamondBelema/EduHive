@@ -30,8 +30,19 @@ class FlashcardRepositoryImpl @Inject constructor(
         return localDataSource.getById(flashcardId)?.toDomain()
     }
 
-    override suspend fun getDueFlashcards(maxBox: Int, limit: Int): List<Flashcard> {
-        return localDataSource.getDue(maxBox).take(limit).map { it.toDomain() }
+    override suspend fun getDueFlashcards(maxBox: Int, limit: Int, hiveId: String?): List<Flashcard> {
+        val due = if (hiveId.isNullOrBlank()) {
+            localDataSource.getDue(maxBox)
+        } else {
+            localDataSource.getDueForHive(hiveId, maxBox)
+        }
+        return due.take(limit).map { it.toDomain() }
+    }
+
+    override suspend fun getStudyFallbackFlashcards(hiveId: String, limit: Int): List<Flashcard> {
+        return localDataSource.getAllForHiveStudy(hiveId)
+            .take(limit)
+            .map { it.toDomain() }
     }
 
     override suspend fun updateLeitnerBox(
@@ -48,7 +59,7 @@ class FlashcardRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteFlashcard(flashcardId: String) {
-        localDataSource.deleteAllForConcept(flashcardId)
+        localDataSource.deleteById(flashcardId)
     }
 
     /**

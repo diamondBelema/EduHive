@@ -54,6 +54,12 @@ class ModelPreferences @Inject constructor(
         }
     }
 
+    suspend fun clearActiveModel() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_ACTIVE_MODEL)
+        }
+    }
+
     fun isModelDownloaded(modelId: String): Boolean {
         return try {
             kotlinx.coroutines.runBlocking {
@@ -67,6 +73,12 @@ class ModelPreferences @Inject constructor(
     suspend fun setModelDownloaded(modelId: String, downloaded: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[keyModelDownloaded(modelId)] = downloaded
+        }
+    }
+
+    suspend fun clearModelDownloadedFlags(modelIds: List<String>) {
+        context.dataStore.edit { prefs ->
+            modelIds.forEach { id -> prefs.remove(keyModelDownloaded(id)) }
         }
     }
 

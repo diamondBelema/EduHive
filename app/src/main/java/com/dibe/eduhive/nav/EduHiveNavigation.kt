@@ -1,8 +1,11 @@
 package com.dibe.eduhive.nav
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -15,10 +18,13 @@ import com.dibe.eduhive.presentation.conceptList.view.ConceptListScreen
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListViewModel
 import com.dibe.eduhive.presentation.conceptList.viewmodel.GenerationMode
 import com.dibe.eduhive.presentation.firstTimeSetup.view.FirstTimeSetupScreen
+import com.dibe.eduhive.presentation.flashcardList.view.FlashcardListScreen
 import com.dibe.eduhive.presentation.flashcardStudy.view.FlashcardStudyScreen
 import com.dibe.eduhive.presentation.generationPreview.view.GenerationPreviewScreen
 import com.dibe.eduhive.presentation.generationPreview.viewmodel.GenerationPreviewViewModel
 import com.dibe.eduhive.presentation.hiveList.view.HiveListScreen
+import com.dibe.eduhive.presentation.materialList.view.MaterialListScreen
+import com.dibe.eduhive.presentation.quizStudy.view.QuizStudyScreen
 import com.dibe.eduhive.presentation.reviewList.view.ReviewListScreen
 import com.dibe.eduhive.presentation.screens.HiveDashboardScreen
 import com.dibe.eduhive.presentation.settings.view.SettingsScreen
@@ -27,7 +33,9 @@ sealed class Screen(val route: String) {
     object FirstTimeSetup : Screen("first_time_setup")
     object HiveList : Screen("hive_list")
     object Settings : Screen("settings")
-    object ReviewList : Screen("review_list")
+    object ReviewList : Screen("review_list/{hiveId}") {
+        fun createRoute(hiveId: String) = "review_list/$hiveId"
+    }
     object HiveDashboard : Screen("hive_dashboard/{hiveId}") {
         fun createRoute(hiveId: String) = "hive_dashboard/$hiveId"
     }
@@ -37,8 +45,18 @@ sealed class Screen(val route: String) {
     object FlashcardStudy : Screen("flashcard_study/{hiveId}") {
         fun createRoute(hiveId: String) = "flashcard_study/$hiveId"
     }
+    object QuizStudy : Screen("quiz_study/{hiveId}") {
+        fun createRoute(hiveId: String) = "quiz_study/$hiveId"
+    }
     object ConceptList : Screen("concept_list/{hiveId}") {
         fun createRoute(hiveId: String) = "concept_list/$hiveId"
+    }
+    object MaterialList : Screen("material_list/{hiveId}") {
+        fun createRoute(hiveId: String) = "material_list/$hiveId"
+    }
+    object FlashcardList : Screen("flashcard_list/{conceptId}/{conceptName}") {
+        fun createRoute(conceptId: String, conceptName: String) =
+            "flashcard_list/$conceptId/${Uri.encode(conceptName)}"
     }
     // New: GenerationPreview receives hiveId + GenerationMode
     object GenerationPreview : Screen("generation_preview/{hiveId}/{mode}") {
@@ -50,13 +68,7 @@ sealed class Screen(val route: String) {
 @Composable
 fun EduHiveNavigation(
     navController: NavHostController = rememberNavController(),
-    viewModel: EduHiveNavViewModel = hiltViewModel(),
-    sharedContent: SharedGenerationContent = androidx.hilt.navigation.compose.hiltViewModel<EduHiveNavViewModel>()
-        .let {
-            // We can't inject SharedGenerationContent directly here easily,
-            // so we use a companion approach — see note below nav graph.
-            SharedGenerationContent()
-        }
+    viewModel: EduHiveNavViewModel = hiltViewModel()
 ) {
     val startDestination by viewModel.startDestination.collectAsState()
     if (startDestination == null) return
@@ -92,7 +104,10 @@ fun EduHiveNavigation(
             SettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
 
-        composable(Screen.ReviewList.route) {
+        composable(
+            route = Screen.ReviewList.route,
+            arguments = listOf(navArgument("hiveId") { type = NavType.StringType })
+        ) {
             ReviewListScreen(onNavigateBack = { navController.popBackStack() })
         }
 
@@ -107,9 +122,30 @@ fun EduHiveNavigation(
                 onNavigateToAddMaterial = { navController.navigate(Screen.AddMaterial.createRoute(hiveId)) },
                 onNavigateToConcepts = { navController.navigate(Screen.ConceptList.createRoute(hiveId)) },
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
-                onNavigateToReviews = { navController.navigate(Screen.ReviewList.route) },
-                onNavigateToMaterials = { navController.navigate(Screen.AddMaterial.createRoute(hiveId)) },
+                onNavigateToReviews = { navController.navigate(Screen.ReviewList.createRoute(hiveId)) },
+                onNavigateToMaterials = { navController.navigate(Screen.MaterialList.createRoute(hiveId)) },
                 onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.MaterialList.route,
+            arguments = listOf(navArgument("hiveId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val hiveId = backStackEntry.arguments?.getString("hiveId") ?: return@composable
+            val context = LocalContext.current
+
+            MaterialListScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onAddMaterial = { navController.navigate(Screen.AddMaterial.createRoute(hiveId)) },
+                onOpenMaterial = { material ->
+                    runCatching {
+                        Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(Uri.parse(material.localPath), "*/*")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }.also { context.startActivity(it) }
+                    }
+                }
             )
         }
 
@@ -128,6 +164,17 @@ fun EduHiveNavigation(
         }
 
         composable(
+            route = Screen.QuizStudy.route,
+            arguments = listOf(navArgument("hiveId") { type = NavType.StringType })
+        ) {
+            val quizPairs = androidx.compose.runtime.remember { contentHolder.consume().second }
+            QuizStudyScreen(
+                quizPairs = quizPairs,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
             route = Screen.ConceptList.route,
             arguments = listOf(navArgument("hiveId") { type = NavType.StringType })
         ) { backStackEntry ->
@@ -138,6 +185,9 @@ fun EduHiveNavigation(
             ConceptListScreen(
                 viewModel = conceptListViewModel,
                 onNavigateBack = { navController.popBackStack() },
+                onOpenConceptFlashcards = { conceptId, conceptName ->
+                    navController.navigate(Screen.FlashcardList.createRoute(conceptId, conceptName))
+                },
                 onNavigateToPreview = { mode ->
                     // Stash generated content before navigating
                     val state = conceptListViewModel.state.value
@@ -148,6 +198,20 @@ fun EduHiveNavigation(
                     )
                     navController.navigate(Screen.GenerationPreview.createRoute(hiveId, mode))
                 }
+            )
+        }
+
+        composable(
+            route = Screen.FlashcardList.route,
+            arguments = listOf(
+                navArgument("conceptId") { type = NavType.StringType },
+                navArgument("conceptName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val conceptName = Uri.decode(backStackEntry.arguments?.getString("conceptName") ?: "Concept")
+            FlashcardListScreen(
+                conceptName = conceptName,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 
@@ -170,9 +234,17 @@ fun EduHiveNavigation(
             GenerationPreviewScreen(
                 viewModel = previewViewModel,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToStudy = {
-                    navController.navigate(Screen.FlashcardStudy.createRoute(hiveId)) {
-                        // Pop preview off the stack so back from study goes to concept list
+                onNavigateToStudy = { destination ->
+                    val snapshot = previewViewModel.state.value
+                    contentHolder.set(snapshot.flashcards, snapshot.quizPairs)
+
+                    val route = when (destination) {
+                        com.dibe.eduhive.presentation.generationPreview.viewmodel.PreviewTab.QUIZ ->
+                            Screen.QuizStudy.createRoute(hiveId)
+                        else -> Screen.FlashcardStudy.createRoute(hiveId)
+                    }
+
+                    navController.navigate(route) {
                         popUpTo(Screen.GenerationPreview.route) { inclusive = true }
                     }
                 }

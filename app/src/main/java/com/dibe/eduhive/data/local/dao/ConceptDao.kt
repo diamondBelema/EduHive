@@ -33,4 +33,7 @@ interface ConceptDao {
 
     @Query("DELETE FROM concepts WHERE hiveId = :hiveId")
     suspend fun deleteAllForHive(hiveId: String)
+
+    @Query("DELETE FROM concepts WHERE conceptId = :conceptId")
+    suspend fun deleteById(conceptId: String)
 }

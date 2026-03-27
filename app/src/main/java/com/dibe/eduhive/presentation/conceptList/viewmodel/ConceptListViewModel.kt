@@ -113,7 +113,7 @@ class ConceptListViewModel @Inject constructor(
                                 conceptId = concept.id,
                                 conceptName = concept.name,
                                 conceptDescription = concept.description,
-                                count = 5
+                                count = 3
                             )
                         }
                     }

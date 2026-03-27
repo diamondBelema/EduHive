@@ -103,15 +103,15 @@ class ReviewFlashcardUseCase @Inject constructor(
      */
     private fun calculateNextReview(box: Int, now: Long): Long {
         val daysToAdd = when (box) {
-            1 -> 1      // Daily
-            2 -> 3      // Every 3 days
-            3 -> 7      // Weekly
-            4 -> 14     // Bi-weekly
-            5 -> 30     // Monthly
-            else -> 1
+            1 -> 1L      // Daily
+            2 -> 3L      // Every 3 days
+            3 -> 7L      // Weekly
+            4 -> 14L     // Bi-weekly
+            5 -> 30L     // Monthly
+            else -> 1L
         }
 
-        return now + (daysToAdd * 24 * 60 * 60 * 1000)
+        return now + (daysToAdd * 24L * 60L * 60L * 1000L)
     }
 
     /**

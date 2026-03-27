@@ -10,11 +10,16 @@ class ModelDownloader(
 ): Downloader {
     private val downloadManager = context.getSystemService(DownloadManager::class.java)
 
-    override fun downloadFile(url: String, name: String): Long {
+    override fun downloadFile(url: String, name: String, allowMobileData: Boolean): Long {
+        val allowedNetworks = if (allowMobileData) {
+            DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE
+        } else {
+            DownloadManager.Request.NETWORK_WIFI
+        }
+
         val request = DownloadManager.Request(url.toUri())
             .setMimeType("application/octet-stream")
-            // Fix: Allow both Wi-Fi and Mobile data to prevent stalling
-            .setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
+            .setAllowedNetworkTypes(allowedNetworks)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setTitle("Downloading AI Model: $name")
             .setDescription("EduHive is downloading the required AI resources.")

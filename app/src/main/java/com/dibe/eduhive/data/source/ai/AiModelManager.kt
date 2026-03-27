@@ -61,6 +61,11 @@ class AIModelManager @Inject constructor(
         return modelFile.exists() && modelFile.length() > 0
     }
 
+    fun isModelReady(modelId: String): Boolean {
+        val modelFile = getModelFile(modelId)
+        return modelFile.exists() && modelFile.length() > 0
+    }
+
     fun getRecommendedModel(): ModelInfo {
         val runtime = Runtime.getRuntime()
         val maxMemoryMB = runtime.maxMemory() / (1024 * 1024)
@@ -82,7 +87,7 @@ class AIModelManager @Inject constructor(
         )
     }
 
-    fun downloadModel(modelId: String): Flow<ModelDownloadProgress> = flow {
+    fun downloadModel(modelId: String, allowMobileData: Boolean = true): Flow<ModelDownloadProgress> = flow {
         val modelInfo = getModelInfo(modelId)
         val modelFile = getModelFile(modelId)
 
@@ -96,7 +101,11 @@ class AIModelManager @Inject constructor(
                 return@flow
             }
 
-            val downloadId = downloader.downloadFile(modelInfo.url, "${modelId}.task")
+            val downloadId = downloader.downloadFile(
+                url = modelInfo.url,
+                name = "${modelId}.task",
+                allowMobileData = allowMobileData
+            )
             emit(ModelDownloadProgress.Registered(downloadId.toString()))
 
             var downloading = true
@@ -287,6 +296,27 @@ class AIModelManager @Inject constructor(
     }
 
     fun getActiveModel(): String? = modelPreferences.getActiveModel()
+
+    suspend fun clearDownloadedModelsCache(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            unloadModel()
+
+            val externalFilesDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val deletedCount = externalFilesDir
+                ?.listFiles()
+                ?.filter { it.isFile && it.extension.equals("task", ignoreCase = true) }
+                ?.sumOf { file -> if (file.delete()) 1 else 0 }
+                ?: 0
+
+            val modelIds = getAvailableModels().map { it.id }
+            modelPreferences.clearModelDownloadedFlags(modelIds)
+            modelPreferences.clearActiveModel()
+
+            Result.success(deletedCount)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     private fun getModelFile(modelId: String): File {
         val externalFilesDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)

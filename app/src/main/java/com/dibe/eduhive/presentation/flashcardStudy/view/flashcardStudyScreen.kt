@@ -35,6 +35,7 @@ fun FlashcardStudyScreen(
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    var showTips by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -58,7 +59,7 @@ fun FlashcardStudyScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* Help/Tips */ }) {
+                    IconButton(onClick = { showTips = true }) {
                         Icon(Icons.Outlined.Lightbulb, contentDescription = "Tips")
                     }
                 }
@@ -80,12 +81,18 @@ fun FlashcardStudyScreen(
                 state.isComplete -> {
                     StudyCompletionScreenExpressive(
                         count = state.completedCount,
-                        onContinue = onNavigateBack
+                        onContinue = {
+                            viewModel.onEvent(FlashcardStudyEvent.StudyAnyway)
+                        },
+                        onBack = onNavigateBack
                     )
                 }
 
                 state.flashcards.isEmpty() -> {
-                    NoFlashcardsStateExpressive(onNavigateBack = onNavigateBack)
+                    NoFlashcardsStateExpressive(
+                        onNavigateBack = onNavigateBack,
+                        onStudyAnyway = { viewModel.onEvent(FlashcardStudyEvent.StudyAnyway) }
+                    )
                 }
 
                 else -> {
@@ -141,6 +148,22 @@ fun FlashcardStudyScreen(
                         }
                     }
                 }
+            }
+
+            if (showTips) {
+                AlertDialog(
+                    onDismissRequest = { showTips = false },
+                    confirmButton = {
+                        TextButton(onClick = { showTips = false }) { Text("Got it") }
+                    },
+                    title = { Text("Study Tips") },
+                    text = {
+                        Text(
+                            "Tap a card to reveal the answer, then rate how well you knew it. " +
+                                "If no cards are due, use Study Anyway to keep practicing."
+                        )
+                    }
+                )
             }
         }
     }
@@ -297,7 +320,8 @@ fun ExpressiveRatingButton(
 @Composable
 fun StudyCompletionScreenExpressive(
     count: Int,
-    onContinue: () -> Unit
+    onContinue: () -> Unit,
+    onBack: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -339,13 +363,23 @@ fun StudyCompletionScreenExpressive(
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = MaterialTheme.shapes.large
         ) {
+            Text("Study More", style = MaterialTheme.typography.titleMedium)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = MaterialTheme.shapes.large
+        ) {
             Text("Back to Dashboard", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
 
 @Composable
-fun NoFlashcardsStateExpressive(onNavigateBack: () -> Unit) {
+fun NoFlashcardsStateExpressive(onNavigateBack: () -> Unit, onStudyAnyway: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -366,6 +400,14 @@ fun NoFlashcardsStateExpressive(onNavigateBack: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(40.dp))
+        Button(
+            onClick = onStudyAnyway,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = MaterialTheme.shapes.large
+        ) {
+            Text("Study Anyway")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         OutlinedButton(
             onClick = onNavigateBack,
             modifier = Modifier.fillMaxWidth().height(56.dp),

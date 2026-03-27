@@ -32,14 +32,14 @@ import com.dibe.eduhive.presentation.generationPreview.viewmodel.PreviewTab
 fun GenerationPreviewScreen(
     viewModel: GenerationPreviewViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit,
-    onNavigateToStudy: () -> Unit
+    onNavigateToStudy: (PreviewTab) -> Unit
 ) {
     val state by viewModel.state.collectAsState()
 
     // Navigate to study when user taps Start Studying
     LaunchedEffect(Unit) {
-        viewModel.navigateToStudy.collect {
-            onNavigateToStudy()
+        viewModel.navigateToStudy.collect { destination ->
+            onNavigateToStudy(destination)
         }
     }
 

@@ -25,6 +25,7 @@ import com.dibe.eduhive.domain.usecase.concept.GetConceptsByHiveUseCase
 import com.dibe.eduhive.domain.usecase.dashboard.GetDashboardOverviewUseCase
 import com.dibe.eduhive.domain.usecase.flashcard.GetFlashcardsForConceptUseCase
 import com.dibe.eduhive.domain.usecase.hive.CreateHiveUseCase
+import com.dibe.eduhive.domain.usecase.hive.GetHivesUseCase
 import com.dibe.eduhive.domain.usecase.hive.SelectHiveUseCase
 import com.dibe.eduhive.domain.usecase.material.AddMaterialUseCase
 import com.dibe.eduhive.domain.usecase.material.GetMaterialsForHiveUseCase
@@ -144,12 +145,14 @@ object UseCaseModule {
         materialRepository: MaterialRepository,
         fileDataSource: FileDataSource,
         conceptRepository: ConceptRepository,
-        flashcardRepository: FlashcardRepository
+        flashcardRepository: FlashcardRepository,
+        getHivesUseCase: GetHivesUseCase
     ) = ProcessMaterialUseCase(
         materialRepository,
         fileDataSource,
         conceptRepository,
-        flashcardRepository
+        flashcardRepository,
+        getHivesUseCase
     )
 
     // ===== QUIZ =====

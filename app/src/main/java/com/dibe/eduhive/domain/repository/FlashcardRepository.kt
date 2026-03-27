@@ -22,7 +22,16 @@ interface FlashcardRepository {
      * @param maxBox Maximum Leitner box to include (default 5 = all boxes)
      * @param limit Maximum number of cards to return
      */
-    suspend fun getDueFlashcards(maxBox: Int = 5, limit: Int = 20): List<Flashcard>
+    suspend fun getDueFlashcards(
+        maxBox: Int = 5,
+        limit: Int = 20,
+        hiveId: String? = null
+    ): List<Flashcard>
+
+    suspend fun getStudyFallbackFlashcards(
+        hiveId: String,
+        limit: Int = 20
+    ): List<Flashcard>
 
     /**
      * Update flashcard's Leitner box and schedule.

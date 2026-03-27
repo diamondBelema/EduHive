@@ -31,4 +31,7 @@ class ConceptLocalDataSource @Inject constructor(
 
     suspend fun deleteAllForHive(hiveId: String) =
         conceptDao.deleteAllForHive(hiveId)
+
+    suspend fun deleteById(conceptId: String) =
+        conceptDao.deleteById(conceptId)
 }

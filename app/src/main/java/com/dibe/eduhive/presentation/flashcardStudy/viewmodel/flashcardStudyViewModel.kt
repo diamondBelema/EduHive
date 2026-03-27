@@ -42,14 +42,21 @@ class FlashcardStudyViewModel @Inject constructor(
             is FlashcardStudyEvent.Reload -> {
                 loadNextFlashcards()
             }
+            is FlashcardStudyEvent.StudyAnyway -> {
+                loadNextFlashcards(allowContinueWhenNoDue = true)
+            }
         }
     }
 
-    private fun loadNextFlashcards() {
+    private fun loadNextFlashcards(allowContinueWhenNoDue: Boolean = false) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
 
-            getNextReviewItemsUseCase(limit = 20).fold(
+            getNextReviewItemsUseCase(
+                hiveId = hiveId,
+                limit = 20,
+                allowContinueWhenNoDue = allowContinueWhenNoDue
+            ).fold(
                 onSuccess = { flashcards ->
                     _state.update {
                         it.copy(
@@ -57,7 +64,9 @@ class FlashcardStudyViewModel @Inject constructor(
                             currentIndex = 0,
                             isLoading = false,
                             isFlipped = false,
-                            error = null
+                            isComplete = false,
+                            completedCount = 0,
+                            error = if (flashcards.isEmpty()) "No flashcards available in this hive yet." else null
                         )
                     }
                 },

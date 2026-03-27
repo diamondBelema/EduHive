@@ -1,12 +1,11 @@
 package com.dibe.eduhive.domain.usecase.material
 
 import android.net.Uri
-import com.dibe.eduhive.data.repository.ConceptRepositoryImpl
-import com.dibe.eduhive.data.repository.FlashcardRepositoryImpl
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.domain.repository.ConceptRepository
 import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
+import com.dibe.eduhive.domain.usecase.hive.GetHivesUseCase
 import javax.inject.Inject
 
 /**
@@ -21,7 +20,8 @@ class ProcessMaterialUseCase @Inject constructor(
     private val materialRepository: MaterialRepository,
     private val fileDataSource: FileDataSource,
     private val conceptRepository: ConceptRepository,
-    private val flashcardRepository: FlashcardRepository
+    private val flashcardRepository: FlashcardRepository,
+    private val getHivesUseCase: GetHivesUseCase
 ) {
     suspend operator fun invoke(
         materialId: String,
@@ -29,7 +29,8 @@ class ProcessMaterialUseCase @Inject constructor(
     ): Result<ProcessMaterialResult> {
         return try {
             // Get material
-            val materials = materialRepository.getMaterialsForHive("")
+            val materials = getHivesUseCase().getOrDefault(emptyList())
+                .flatMap { hive -> materialRepository.getMaterialsForHive(hive.id) }
             val material = materials.find { it.id == materialId }
                 ?: return Result.failure(IllegalArgumentException("Material not found"))
 
@@ -53,7 +54,7 @@ class ProcessMaterialUseCase @Inject constructor(
                     conceptId = concept.id,
                     conceptName = concept.name,
                     conceptDescription = concept.description,
-                    count = 5
+                    count = 3
                 )
                 totalFlashcards += flashcards.size
             }

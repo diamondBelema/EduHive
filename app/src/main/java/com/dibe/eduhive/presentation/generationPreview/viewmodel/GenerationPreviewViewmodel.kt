@@ -36,7 +36,7 @@ class GenerationPreviewViewModel @Inject constructor(
     private val _state = MutableStateFlow(GenerationPreviewState())
     val state: StateFlow<GenerationPreviewState> = _state.asStateFlow()
 
-    private val _navigateToStudy = MutableSharedFlow<Unit>()
+    private val _navigateToStudy = MutableSharedFlow<PreviewTab>()
     val navigateToStudy = _navigateToStudy.asSharedFlow()
 
     fun setGeneratedContent(
@@ -62,7 +62,7 @@ class GenerationPreviewViewModel @Inject constructor(
             }
             is GenerationPreviewEvent.StartStudying -> {
                 viewModelScope.launch {
-                    _navigateToStudy.emit(Unit)
+                    _navigateToStudy.emit(state.value.selectedTab)
                 }
             }
         }

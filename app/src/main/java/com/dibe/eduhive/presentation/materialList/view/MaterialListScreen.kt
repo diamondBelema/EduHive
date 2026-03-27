@@ -6,7 +6,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Material
-import com.dibe.eduhive.domain.model.MaterialType
 import com.dibe.eduhive.presentation.materialList.viewmodel.MaterialListViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -25,7 +23,8 @@ import java.util.*
 fun MaterialListScreen(
     viewModel: MaterialListViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit,
-    onNavigateToDetail: (String) -> Unit
+    onOpenMaterial: (Material) -> Unit,
+    onAddMaterial: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -38,6 +37,13 @@ fun MaterialListScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 }
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onAddMaterial,
+                icon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                text = { Text("Add Docs") }
             )
         }
     ) { padding ->
@@ -55,7 +61,7 @@ fun MaterialListScreen(
                     items(state.materials) { material ->
                         MaterialListItem(
                             material = material,
-                            onClick = { onNavigateToDetail(material.id) }
+                            onClick = { onOpenMaterial(material) }
                         )
                     }
                 }

@@ -12,21 +12,30 @@ class GetNextReviewItemsUseCase @Inject constructor(
     private val flashcardRepository: FlashcardRepository
 ) {
     suspend operator fun invoke(
+        hiveId: String,
         limit: Int = 20,
-        includeNewCards: Boolean = true
+        includeNewCards: Boolean = true,
+        allowContinueWhenNoDue: Boolean = false
     ): Result<List<Flashcard>> {
         return try {
             val maxBox = if (includeNewCards) 5 else 4
 
             val dueCards = flashcardRepository.getDueFlashcards(
                 maxBox = maxBox,
-                limit = limit
+                limit = limit,
+                hiveId = hiveId
             )
+
+            val cards = if (dueCards.isEmpty() && allowContinueWhenNoDue) {
+                flashcardRepository.getStudyFallbackFlashcards(hiveId = hiveId, limit = limit)
+            } else {
+                dueCards
+            }
 
             // Sort by priority:
             // 1. Overdue cards (box 1 first)
             // 2. Cards in lower boxes (need more practice)
-            val sorted = dueCards.sortedWith(
+            val sorted = cards.sortedWith(
                 compareBy<Flashcard> { it.currentBox }
                     .thenBy { it.lastSeenAt ?: 0 }
             )

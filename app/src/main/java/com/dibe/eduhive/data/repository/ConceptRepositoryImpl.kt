@@ -21,6 +21,10 @@ class ConceptRepositoryImpl @Inject constructor(
     private val learningEngine: LearningEngine
 ) : ConceptRepository {
 
+    companion object {
+        private const val MIN_TARGET_CONCEPTS = 10
+    }
+
     override suspend fun addConcepts(concepts: List<Concept>) {
         val entities = concepts.map { ConceptEntity.fromDomain(it) }
         localDataSource.insertAll(entities)
@@ -81,7 +85,7 @@ class ConceptRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteConcept(conceptId: String) {
-        localDataSource.deleteAllForHive(conceptId)
+        localDataSource.deleteById(conceptId)
     }
 
     override fun extractConceptsFromMaterialStreaming(
@@ -181,7 +185,15 @@ class ConceptRepositoryImpl @Inject constructor(
             return emptyList()
         }
 
-        val domainConcepts = concepts.map { aiConcept ->
+        val boostedConcepts = if (concepts.size < MIN_TARGET_CONCEPTS) {
+            val mergedText = pages.joinToString("\n\n").take(8000)
+            val retry = aiDataSource.extractConcepts(mergedText, hiveContext).getOrDefault(emptyList())
+            (concepts + retry).distinctBy { it.name.trim().lowercase() }
+        } else {
+            concepts
+        }
+
+        val domainConcepts = boostedConcepts.map { aiConcept ->
             Concept(
                 id = UUID.randomUUID().toString(),
                 hiveId = hiveId,

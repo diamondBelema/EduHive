@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Concept
@@ -34,6 +35,7 @@ import com.dibe.eduhive.presentation.conceptList.viewmodel.GenerationMode
 fun ConceptListScreen(
     viewModel: ConceptListViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit,
+    onOpenConceptFlashcards: (String, String) -> Unit,
     onNavigateToPreview: (GenerationMode) -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -160,6 +162,9 @@ fun ConceptListScreen(
                             SelectableConceptCard(
                                 concept = concept,
                                 isSelected = concept.id in state.selectedIds,
+                                onOpenFlashcards = {
+                                    onOpenConceptFlashcards(concept.id, concept.name)
+                                },
                                 onToggle = {
                                     viewModel.onEvent(ConceptListEvent.ToggleSelection(concept.id))
                                 }
@@ -233,8 +238,11 @@ private fun SelectionHintBanner() {
 fun SelectableConceptCard(
     concept: Concept,
     isSelected: Boolean,
+    onOpenFlashcards: () -> Unit,
     onToggle: () -> Unit
 ) {
+    var isExpanded by remember(concept.id) { mutableStateOf(false) }
+
     val containerColor = if (isSelected)
         MaterialTheme.colorScheme.primaryContainer
     else
@@ -301,8 +309,22 @@ fun SelectableConceptCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2
+                        maxLines = if (isExpanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    TextButton(
+                        onClick = { isExpanded = !isExpanded },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(if (isExpanded) "Show less" else "Show more")
+                    }
+                }
+
+                TextButton(
+                    onClick = onOpenFlashcards,
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("View flashcards")
                 }
             }
 
@@ -356,7 +378,7 @@ private fun GenerationActionBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 GenerateChip(
-                    label = "Flashcards",
+                    label = "Cards",
                     icon = Icons.Rounded.Style,
                     onClick = { onGenerate(GenerationMode.FLASHCARDS) },
                     enabled = !isGenerating,
