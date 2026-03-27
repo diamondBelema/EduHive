@@ -6,7 +6,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -19,20 +18,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.dibe.eduhive.presentation.addMaterial.viewmodel.AddMaterialEvent
 import com.dibe.eduhive.presentation.addMaterial.viewmodel.AddMaterialViewModel
+import com.dibe.eduhive.workers.MaterialProcessingWorker
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,6 +44,16 @@ fun AddMaterialScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    // Observe background work via Flow — no LiveData dependency needed
+    val workManager = remember { WorkManager.getInstance(context) }
+    val activeWorkInfos by workManager.getWorkInfosByTagFlow("material_processing")
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val currentWork = activeWorkInfos.firstOrNull {
+        it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
+    }
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var showTitleSheet by remember { mutableStateOf(false) }
@@ -74,7 +85,7 @@ fun AddMaterialScreen(
 
     LaunchedEffect(state.successMessage) {
         state.successMessage?.let {
-            delay(2500) // Longer delay for expressive satisfaction
+            delay(2000)
             onNavigateBack()
         }
     }
@@ -82,12 +93,12 @@ fun AddMaterialScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { 
+                title = {
                     Text(
-                        "Import Knowledge", 
+                        "Import Knowledge",
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge
-                    ) 
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -103,23 +114,25 @@ fun AddMaterialScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Expressive state switching using AnimatedContent
             AnimatedContent(
-                targetState = state.isProcessing,
+                targetState = currentWork != null,
                 transitionSpec = {
-                    fadeIn(tween(500)) + scaleIn(initialScale = 0.92f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) togetherWith
-                    fadeOut(tween(400)) + scaleOut(targetScale = 0.95f)
+                    fadeIn(tween(500)) + scaleIn(initialScale = 0.92f) togetherWith
+                            fadeOut(tween(400)) + scaleOut(targetScale = 0.95f)
                 },
                 label = "processing_transition"
             ) { isProcessing ->
-                if (isProcessing) {
+                if (isProcessing && currentWork != null) {
+                    val progress = currentWork.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0) / 100f
+                    val status = currentWork.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Queued..."
+
                     ProcessingStateExpressive(
-                        status = state.processingStatus ?: "Connecting to Hive...",
-                        progress = state.progressPercentage / 100f,
+                        status = status,
+                        progress = progress,
                         successMessage = state.successMessage,
-                        flashcardsValid = state.flashcardsValid,
-                        flashcardsRejected = state.flashcardsRejected,
-                        duplicatesFound = state.duplicatesFound
+                        flashcardsValid = currentWork.progress.getInt(MaterialProcessingWorker.KEY_FLASHCARDS_COUNT, 0),
+                        flashcardsRejected = 0,
+                        duplicatesFound = 0
                     )
                 } else {
                     ImportSelectionExpressive(
@@ -164,7 +177,7 @@ fun ImportSelectionExpressive(
             lineHeight = 36.sp,
             color = MaterialTheme.colorScheme.onSurface
         )
-        
+
         ImportCardExpressive(
             title = "Document or PDF",
             subtitle = "Books, research papers, notes",
@@ -182,8 +195,7 @@ fun ImportSelectionExpressive(
         )
 
         Spacer(modifier = Modifier.weight(1f))
-        
-        // Expressive AI Badge
+
         Surface(
             color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
             shape = MaterialTheme.shapes.extraLarge,
@@ -200,8 +212,8 @@ fun ImportSelectionExpressive(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Rounded.AutoAwesome, 
-                            contentDescription = null, 
+                            Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -229,7 +241,7 @@ fun ImportCardExpressive(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f, 
+        targetValue = if (isPressed) 0.96f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
         label = "scale"
     )
@@ -260,14 +272,14 @@ fun ImportCardExpressive(
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(
-                    title, 
-                    style = MaterialTheme.typography.titleLarge, 
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    subtitle, 
-                    style = MaterialTheme.typography.bodyMedium, 
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = LocalContentColor.current.copy(alpha = 0.7f)
                 )
             }
@@ -298,7 +310,6 @@ fun ProcessingStateExpressive(
         verticalArrangement = Arrangement.Center
     ) {
         Box(contentAlignment = Alignment.Center) {
-            // Outer expressive ring
             CircularProgressIndicator(
                 progress = { 1f },
                 modifier = Modifier.size(240.dp),
@@ -306,16 +317,15 @@ fun ProcessingStateExpressive(
                 strokeWidth = 12.dp,
                 strokeCap = StrokeCap.Round
             )
-            
-            // Active progress ring
+
             CircularProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier.size(240.dp),
                 strokeWidth = 16.dp,
                 strokeCap = StrokeCap.Round,
-                color = if (successMessage != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary
             )
-            
+
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 AnimatedContent(
                     targetState = successMessage != null,
@@ -326,8 +336,8 @@ fun ProcessingStateExpressive(
                 ) { isDone ->
                     if (isDone) {
                         Icon(
-                            Icons.Rounded.Check, 
-                            contentDescription = null, 
+                            Icons.Rounded.Check,
+                            contentDescription = null,
                             modifier = Modifier.size(80.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -344,22 +354,6 @@ fun ProcessingStateExpressive(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Quality badges — visible once validation data is available
-        AnimatedVisibility(
-            visible = flashcardsValid > 0 || flashcardsRejected > 0,
-            enter = fadeIn()
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 16.dp)
-            ) {
-                if (flashcardsValid > 0) QualityBadge(QualityStatus.VALID, flashcardsValid)
-                if (flashcardsRejected > 0) QualityBadge(QualityStatus.REJECTED, flashcardsRejected)
-                if (duplicatesFound > 0) QualityBadge(QualityStatus.FLAGGED, duplicatesFound)
-            }
-        }
-
-        // Expressive Status Pill
         Surface(
             color = MaterialTheme.colorScheme.secondaryContainer,
             shape = CircleShape
@@ -376,7 +370,7 @@ fun ProcessingStateExpressive(
                     )
                     Spacer(Modifier.width(12.dp))
                 }
-                
+
                 Text(
                     text = if (successMessage != null) "Complete!" else status,
                     style = MaterialTheme.typography.labelLarge,
@@ -385,15 +379,14 @@ fun ProcessingStateExpressive(
                 )
             }
         }
-        
+
         AnimatedVisibility(
             visible = successMessage != null,
             enter = slideInVertically { it / 2 } + fadeIn()
         ) {
             Column(
                 modifier = Modifier.padding(top = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 successMessage?.let {
                     Text(
@@ -402,14 +395,6 @@ fun ProcessingStateExpressive(
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                // Detailed quality breakdown on completion
-                if (flashcardsValid > 0 || flashcardsRejected > 0) {
-                    ValidationSummary(
-                        flashcardsValid = flashcardsValid,
-                        flashcardsRejected = flashcardsRejected,
-                        duplicatesFound = duplicatesFound
                     )
                 }
             }
@@ -439,19 +424,19 @@ fun TitleEntryBottomSheet(
                 .padding(bottom = 48.dp, top = 8.dp)
         ) {
             Text(
-                "Name this Material", 
-                style = MaterialTheme.typography.headlineSmall, 
+                "Name this Material",
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Give your knowledge source a clear name for your hive.", 
-                style = MaterialTheme.typography.bodyMedium, 
+                "Give your knowledge source a clear name for your hive.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             Spacer(Modifier.height(24.dp))
-            
+
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
@@ -464,13 +449,15 @@ fun TitleEntryBottomSheet(
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
             )
-            
+
             Spacer(Modifier.height(32.dp))
-            
+
             Button(
                 onClick = { if (title.isNotBlank()) onConfirm(title) },
                 enabled = title.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
                 shape = MaterialTheme.shapes.large,
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
             ) {
@@ -479,5 +466,3 @@ fun TitleEntryBottomSheet(
         }
     }
 }
-
-private enum class MaterialType { DOCUMENT, IMAGE }

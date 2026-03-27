@@ -42,6 +42,7 @@ workManager = "2.10.0"
 
 # AndroidX Hilt extensions (WorkManager integration)
 hiltWork = "1.2.0"
+runtimeLivedata = "1.10.6"
 
 [libraries]
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
@@ -112,6 +113,7 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 # AndroidX Hilt extensions (WorkManager + ViewModel)
 androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "hiltWork" }
 androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltWork" }
+androidx-compose-runtime-livedata = { group = "androidx.compose.runtime", name = "runtime-livedata", version.ref = "runtimeLivedata" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

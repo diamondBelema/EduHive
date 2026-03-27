@@ -11,9 +11,13 @@
     <!-- Internet for AI/web -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Required for background task notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-
+    <!-- Required for Foreground Services in WorkManager (Android 14+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".EduHiveApplication"
@@ -25,10 +29,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.EduHive">
+
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="ocr" />
-        <!-- To use multiple models: android:value="ocr,model2,model3" -->
 
         <!-- Disable the default WorkManager initializer so we can use the
              Hilt-provided HiltWorkerFactory via Configuration.Provider. -->
@@ -43,16 +47,22 @@
                 tools:node="remove" />
         </provider>
 
+        <!-- Required for WorkManager Foreground Services -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.EduHive">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
         <receiver android:name=".DownloadCompletedReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />

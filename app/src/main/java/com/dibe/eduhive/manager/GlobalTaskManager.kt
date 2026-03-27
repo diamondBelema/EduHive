@@ -36,11 +36,16 @@ class GlobalTaskManager @Inject constructor(
                     else -> TaskType.UNKNOWN
                 }
                 
+                // Extract hiveId from input data (it's always passed in)
+                val hiveId = info.progress.getString(MaterialProcessingWorker.KEY_HIVE_ID) 
+                    ?: info.progress.getString(FlashcardGenerationWorker.KEY_HIVE_ID)
+                    ?: info.id.toString() // Fallback
+
                 val progress = info.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 
                     info.progress.getInt(FlashcardGenerationWorker.KEY_COMPLETED, 0))
                 val total = info.progress.getInt(FlashcardGenerationWorker.KEY_TOTAL, 100)
                 
-                val status = info.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Processing..."
+                val status = info.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Queued..."
                 val title = info.progress.getString(MaterialProcessingWorker.KEY_TITLE) ?: when(type) {
                     TaskType.MATERIAL -> "Adding Material"
                     TaskType.FLASHCARD -> "Generating Flashcards"
@@ -50,6 +55,7 @@ class GlobalTaskManager @Inject constructor(
 
                 TaskProgress(
                     id = info.id.toString(),
+                    hiveId = hiveId,
                     type = type,
                     title = title,
                     status = status,
@@ -64,6 +70,7 @@ enum class TaskType { MATERIAL, FLASHCARD, QUIZ, UNKNOWN }
 
 data class TaskProgress(
     val id: String,
+    val hiveId: String,
     val type: TaskType,
     val title: String,
     val status: String,
