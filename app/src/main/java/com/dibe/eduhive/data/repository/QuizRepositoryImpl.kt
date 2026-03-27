@@ -31,6 +31,10 @@ class QuizRepositoryImpl @Inject constructor(
         return localDataSource.getForConcept(conceptId).map { it.toDomain() }
     }
 
+    override suspend fun getQuizzesForHive(hiveId: String): List<Quiz> {
+        return localDataSource.getQuizzesWithQuestionsForHive(hiveId).map { it.quiz.toDomain() }
+    }
+
     override suspend fun getQuizById(quizId: String): Quiz? {
         return localDataSource.getQuizWithQuestions(quizId)?.quiz?.toDomain()
     }

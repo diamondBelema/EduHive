@@ -77,4 +77,7 @@ interface FlashcardRepository {
     ): List<Flashcard>
 
     suspend fun deleteFlashcard(flashcardId: String)
+
+    /** Delete all flashcards belonging to a concept before concept removal. */
+    suspend fun deleteAllFlashcardsForConcept(conceptId: String)
 }

@@ -2,73 +2,21 @@ package com.dibe.eduhive.data.source.ai
 
 /**
  * Prompt templates for each generation task.
- *
- * Design principles for small on-device models (135M–1B parameters):
- *
- * 1. Examples ARE the instruction.
- *    Small models pattern-match to concrete examples far better than they follow
- *    prose rules. Show exactly what you want — twice. Never use placeholders like
- *    "name" because the model will output the literal token.
- *
- * 2. One task per prompt.
- *    Never ask the model to analyse AND format in the same call. The prompt either
- *    extracts concepts OR generates flashcards — never both.
- *
- * 3. Ask for fewer items, get better items.
- *    3 concepts per page is reliable across all model sizes. 5 is only reliable
- *    on Gemma 1B. Aggregate across pages to get total concept count.
- *
- * 4. Keep the instruction block short.
- *    Every character of instruction text competes with response tokens in the
- *    same context window. Aim for < 120 tokens of instructions.
- *
- * 5. Low temperature handles format, not the prompt.
- *    Do not add "strictly follow the format" or "do not deviate" — those phrases
- *    waste tokens. Set temperature=0.2 in GenerationConfig instead.
- *
- * 6. End with the last example line, not an instruction.
- *    The model continues from the last line it sees. If the last line is
- *    "Now extract 3 concepts:" the model may echo that. If the last line is
- *    "DESCRIPTION: ..." the model is primed to start the next CONCEPT: block.
+ * 
+ * DESIGN UPDATE: Enhanced for variety and non-repetitive logic.
  */
 object LLMPromptTemplates {
 
-    // ─── Known example values the parser must ignore ────────────────────────
-    // These are the concept names used in our prompt examples. If the model
-    // echoes them back, the parser will skip them as known-example noise.
     val KNOWN_EXAMPLE_CONCEPT_NAMES = setOf(
         "example concept a",
         "example concept b"
     )
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Concept extraction
-    // ────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Extract 3 concepts from a single cleaned page of text.
-     *
-     * Why 3 and not 5:
-     * - 3 concept pairs (~90 tokens output) comfortably fit in the response
-     *   budget left after the prompt + page text.
-     * - If a document has 10 pages and each yields 3 concepts, deduplication
-     *   produces 15–25 unique concepts — more than enough.
-     * - Asking for 5 from a 135M model on a token-tight budget produces 3 good
-     *   ones and 2 garbage ones. Better to ask for 3 and get 3 good ones.
-     *
-     * Why two examples and no placeholders:
-     * - One example gives the model a pattern to copy once.
-     * - Two examples confirms the pattern — the model sees it is not a one-off.
-         * - Placeholders such as "name" and "description" get copied verbatim by small models.
-     *
-     * The prompt ends immediately after the second example's DESCRIPTION line.
-     * This primes the model to continue writing a third CONCEPT: block rather
-     * than echoing the instruction header.
-     */
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-Extract up to 10 specific concepts from the text below.
+Extract up to 10 unique and distinct concepts from the text below.
+Avoid overlapping or repetitive ideas. Focus on core terminology and logic.
 ${contextLine}
 Text:
 $text
@@ -80,27 +28,15 @@ DESCRIPTION: A short definition of a key idea found in the provided text.
 CONCEPT: Example Concept B
 DESCRIPTION: Another distinct idea from the provided text, not a repeat.
         """.trimIndent()
-        // Intentionally ends here — model continues with the next CONCEPT: block
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Flashcard generation
-    // ────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Generate [count] flashcards for a single concept.
-     *
-     * Why count is capped externally at 3:
-     * The caller (AiDataSource) should pass count=3. Three FRONT/BACK pairs
-     * (~120 tokens) fit comfortably in the response budget. Passing count=5
-     * risks truncation on smaller models.
-     *
-     * The prompt ends after the second example BACK line to prime continuation.
-     */
     fun flashcardDraft(conceptName: String, conceptDescription: String, count: Int): String {
         return """
-Create $count flashcards for: $conceptName
+Create $count high-quality flashcards for: $conceptName
 Context: $conceptDescription
+
+Each card must cover a DIFFERENT aspect of the concept (e.g., definition, use-case, counter-example).
+Do not repeat the same question in different words.
 
 Output format:
 FRONT: What is the main idea of "$conceptName"?
@@ -179,8 +115,14 @@ $cardsBlock
      */
     fun quizGeneration(conceptName: String, conceptDescription: String, count: Int): String {
         return """
-Create $count quiz questions about: $conceptName
+Create $count distinct and challenging quiz questions about: $conceptName
 Context: $conceptDescription
+
+VARIETY IS KEY:
+- Use different question types (MCQ, TRUE_FALSE).
+- Ask about different details (definitions, relationships, implications).
+- DO NOT repeat the same fact across multiple questions.
+- Distractors (wrong options) should be plausible but clearly incorrect.
 
 MCQ format:
 QUESTION 1
@@ -202,26 +144,11 @@ CORRECT: A
         """.trimIndent()
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Prompt mutation for retry logic
-    // ────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Appends a short re-focusing suffix to a base prompt on retry.
-     *
-     * Attempt 0: no mutation (base prompt used as-is)
-     * Attempt 1: nudge toward definitions
-     * Attempt 2: nudge toward brevity
-     *
-     * We only go to attempt 2 max — more attempts rarely improve quality and
-     * burn time on an on-device model. The caller handles the attempt limit via
-     * GenerationConfig.retryAttempts.
-     */
     fun mutate(basePrompt: String, attempt: Int): String {
         val suffix = when (attempt) {
             0    -> ""
-            1    -> "\nFocus on definitions and key terms."
-            else -> "\nKeep answers short. One sentence per answer."
+            1    -> "\nFocus on high-level architecture and abstract logic."
+            else -> "\nFocus on granular details and specific edge cases."
         }
         return basePrompt + suffix
     }

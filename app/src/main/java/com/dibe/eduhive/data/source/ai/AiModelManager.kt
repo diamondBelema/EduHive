@@ -43,15 +43,17 @@ class AIModelManager @Inject constructor(
         private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q4_0-web.task?download=true"
 
-
-
-
-        // Input limits are enforced per-task in AiDataSource, not here.
-        // The manager accepts whatever prompt it receives.
-        const val MAX_INPUT_CHARS = Int.MAX_VALUE  // deprecated — use AiDataSource task limits
+        /**
+         * Maximum input characters allowed.
+         * 3500 chars is roughly 800-900 tokens, which fits comfortably 
+         * in the 1280 token window while leaving room for output.
+         */
+        const val MAX_INPUT_CHARS = 3500
     }
 
     private var llmInference: LlmInference? = null
+    private var loadedModelId: String? = null
+    private var loadedMaxTokens: Int = 0
     private var currentConfig: GenerationConfig = GenerationConfig()
     private val inferenceMutex = Mutex()
 
@@ -152,10 +154,18 @@ class AIModelManager @Inject constructor(
     suspend fun loadModel(modelId: String, config: GenerationConfig = GenerationConfig()): Result<Unit> = withContext(Dispatchers.IO) {
         inferenceMutex.withLock {
             try {
+                // If the same model is already loaded with the same maxTokens, just update the config for session params
+                if (llmInference != null && loadedModelId == modelId && loadedMaxTokens == config.maxTokens) {
+                    currentConfig = config
+                    return@withLock Result.success(Unit)
+                }
+
                 val modelFile = getModelFile(modelId)
                 if (!modelFile.exists()) return@withLock Result.failure(Exception("Model file not found"))
 
                 currentConfig = config
+                
+                // Explicitly close previous engine to release native resources
                 llmInference?.close()
                 llmInference = null
 
@@ -165,10 +175,12 @@ class AIModelManager @Inject constructor(
                     .build()
 
                 llmInference = LlmInference.createFromOptions(context, options)
+                loadedModelId = modelId
+                loadedMaxTokens = config.maxTokens
 
                 modelPreferences.setActiveModel(modelId)
 
-                Log.d(TAG, "Model $modelId engine loaded. Session-based generation enabled.")
+                Log.d(TAG, "Model $modelId engine loaded with maxTokens=${config.maxTokens}")
                 Result.success(Unit)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load model", e)
@@ -235,28 +247,26 @@ class AIModelManager @Inject constructor(
      * Streaming generation using a fresh session.
      */
     fun generateStreaming(prompt: String): Flow<GenerationResult> = flow {
-        val engine = llmInference ?: run {
+        if (llmInference == null) {
             emit(GenerationResult.Error(Exception("AI engine not loaded")))
             return@flow
         }
 
-        val safePrompt = if (prompt.length > MAX_INPUT_CHARS) {
-            prompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
-        } else prompt
+        // Use the hardened generate() path to avoid native-session instability in flow context.
+        // We still expose a progress event so UI behavior remains unchanged.
+        emit(GenerationResult.Progress(0, 1, 0, ""))
 
-        try {
-            val response = inferenceMutex.withLock {
-                val session = createSessionInternal() ?: throw Exception("Session creation failed")
-                session.use { session ->
-                    session.addQueryChunk(safePrompt)
-                    session.generateResponse()
-                }
+        generate(prompt).fold(
+            onSuccess = { response ->
+                emit(GenerationResult.Progress(0, 1, 1, response))
+                emit(GenerationResult.Success(response.trim(), 1, 1))
+            },
+            onFailure = { error ->
+                emit(GenerationResult.Error(error))
             }
-            emit(GenerationResult.Progress(0, 1, 1, response))
-            emit(GenerationResult.Success(response.trim(), 1, 1))
-        } catch (e: Exception) {
-            emit(GenerationResult.Error(e))
-        }
+        )
+    }.catch { throwable ->
+        emit(GenerationResult.Error(Exception(throwable.message ?: "Streaming generation failed", throwable)))
     }.flowOn(Dispatchers.IO)
 
     suspend fun processDocumentBatched(
@@ -285,13 +295,18 @@ class AIModelManager @Inject constructor(
 
     fun isModelLoaded(): Boolean = llmInference != null
 
-    fun unloadModel(): Result<Unit> {
-        return try {
-            llmInference?.close()
-            llmInference = null
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    suspend fun unloadModel(): Result<Unit> = withContext(Dispatchers.IO) {
+        inferenceMutex.withLock {
+            try {
+                llmInference?.close()
+                llmInference = null
+                loadedModelId = null
+                loadedMaxTokens = 0
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to unload model", e)
+                Result.failure(e)
+            }
         }
     }
 

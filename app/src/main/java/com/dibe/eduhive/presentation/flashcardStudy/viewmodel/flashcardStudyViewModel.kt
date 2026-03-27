@@ -28,7 +28,7 @@ class FlashcardStudyViewModel @Inject constructor(
     val state: StateFlow<FlashcardStudyState> = _state.asStateFlow()
 
     init {
-        loadNextFlashcards()
+        loadNextFlashcards(allowContinueWhenNoDue = true)
     }
 
     fun onEvent(event: FlashcardStudyEvent) {
@@ -40,7 +40,7 @@ class FlashcardStudyViewModel @Inject constructor(
                 rateFlashcard(event.level)
             }
             is FlashcardStudyEvent.Reload -> {
-                loadNextFlashcards()
+                loadNextFlashcards(allowContinueWhenNoDue = true)
             }
             is FlashcardStudyEvent.StudyAnyway -> {
                 loadNextFlashcards(allowContinueWhenNoDue = true)

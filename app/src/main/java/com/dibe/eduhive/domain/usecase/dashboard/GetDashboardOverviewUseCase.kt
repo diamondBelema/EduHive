@@ -5,53 +5,47 @@ import com.dibe.eduhive.domain.repository.ConceptRepository
 import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
 import com.dibe.eduhive.domain.repository.ReviewEventRepository
+import com.dibe.eduhive.domain.repository.QuizRepository
 import javax.inject.Inject
 
 /**
  * Use case for getting a complete dashboard overview for a hive.
- *
- * Provides:
- * - Overall progressPercentage metrics
- * - Weak concepts that need attention
- * - Study statistics
- * - Recent activity
  */
 class GetDashboardOverviewUseCase @Inject constructor(
     private val conceptRepository: ConceptRepository,
     private val flashcardRepository: FlashcardRepository,
     private val materialRepository: MaterialRepository,
-    private val reviewEventRepository: ReviewEventRepository
+    private val reviewEventRepository: ReviewEventRepository,
+    private val quizRepository: QuizRepository
 ) {
     suspend operator fun invoke(hiveId: String): Result<DashboardOverview> {
         return try {
-            // Get all concepts for the hive
             val concepts = conceptRepository.getConceptsForHive(hiveId)
             val conceptIds = concepts.map { it.id }.toSet()
 
-            // Calculate average confidence
             val averageConfidence = conceptRepository.getAverageConfidence(hiveId) ?: 0.0
-
-            // Get weak concepts (bottom 5)
             val weakConcepts = conceptRepository.getWeakestConcepts(hiveId, limit = 5)
 
-            // Get due flashcards count
             val dueFlashcards = flashcardRepository.getDueFlashcards(
                 maxBox = 5,
                 limit = 100,
                 hiveId = hiveId
             )
 
-            // Get materials count
             val materials = materialRepository.getMaterialsForHive(hiveId)
 
-            // Get recent activity (last 7 days)
             val sevenDaysAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
             val recentEvents = reviewEventRepository.getEventsInRange(
                 startTime = sevenDaysAgo,
                 endTime = System.currentTimeMillis()
             ).filter { event -> event.conceptId in conceptIds }
 
-            // Calculate mastery distribution
+            // Fetch total quizzes for this hive
+            var totalQuizzes = 0
+            concepts.forEach { concept ->
+                totalQuizzes += quizRepository.getQuizzesForConcept(concept.id).size
+            }
+
             val masteryDistribution = MasteryDistribution(
                 beginner = concepts.count { it.confidence < 0.3 },
                 learning = concepts.count { it.confidence in 0.3..0.6 },
@@ -68,6 +62,7 @@ class GetDashboardOverviewUseCase @Inject constructor(
                     dueFlashcardsCount = dueFlashcards.size,
                     totalMaterials = materials.size,
                     recentReviewsCount = recentEvents.size,
+                    totalQuizzes = totalQuizzes,
                     masteryDistribution = masteryDistribution
                 )
             )
@@ -85,12 +80,13 @@ data class DashboardOverview(
     val dueFlashcardsCount: Int,
     val totalMaterials: Int,
     val recentReviewsCount: Int,
+    val totalQuizzes: Int,
     val masteryDistribution: MasteryDistribution
 )
 
 data class MasteryDistribution(
-    val beginner: Int,      // < 30% confidence
-    val learning: Int,      // 30-60% confidence
-    val proficient: Int,    // 60-80% confidence
-    val mastered: Int       // > 80% confidence
+    val beginner: Int,
+    val learning: Int,
+    val proficient: Int,
+    val mastered: Int
 )

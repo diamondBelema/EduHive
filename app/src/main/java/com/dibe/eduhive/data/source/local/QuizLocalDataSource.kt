@@ -27,6 +27,9 @@ class QuizLocalDataSource @Inject constructor(
     suspend fun getQuizWithQuestions(quizId: String) =
         quizDao.getQuizWithQuestions(quizId)
 
+    suspend fun getQuizzesWithQuestionsForHive(hiveId: String) =
+        quizDao.getQuizzesWithQuestionsForHive(hiveId)
+
     suspend fun delete(quizId: String) =
         quizDao.delete(quizId)
 }

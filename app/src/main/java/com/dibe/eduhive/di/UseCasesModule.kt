@@ -82,12 +82,14 @@ object UseCaseModule {
         conceptRepository: ConceptRepository,
         flashcardRepository: FlashcardRepository,
         materialRepository: MaterialRepository,
-        reviewEventRepository: ReviewEventRepository
+        reviewEventRepository: ReviewEventRepository,
+        quizRepository: QuizRepository
     ) = GetDashboardOverviewUseCase(
         conceptRepository,
         flashcardRepository,
         materialRepository,
-        reviewEventRepository
+        reviewEventRepository,
+        quizRepository
     )
 
     // ===== FLASHCARD =====

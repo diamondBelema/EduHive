@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Quiz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,11 +42,12 @@ fun HiveDashboardScreen(
     hiveId: String,
     viewModel: HiveDashboardViewModel = hiltViewModel(),
     onNavigateToStudy: () -> Unit,
+    onNavigateToQuiz: () -> Unit,
     onNavigateToAddMaterial: () -> Unit,
     onNavigateToConcepts: () -> Unit,
     onNavigateToReviews: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToMaterials: () -> Unit, // Add this
+    onNavigateToMaterials: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -126,22 +128,22 @@ fun HiveDashboardScreen(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 ActionCardExpressive(
-                                    title = "Study Now",
-                                    subtitle = "${overview.dueFlashcardsCount} cards due",
+                                    title = "Study",
+                                    subtitle = "${overview.dueFlashcardsCount} cards",
                                     icon = Icons.Rounded.PlayArrow,
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                     onClick = onNavigateToStudy,
-                                    modifier = Modifier.weight(1.1f)
+                                    modifier = Modifier.weight(1f)
                                 )
                                 ActionCardExpressive(
-                                    title = "Import",
-                                    subtitle = "PDF, Image",
-                                    icon = Icons.Rounded.Add,
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    onClick = onNavigateToAddMaterial,
-                                    modifier = Modifier.weight(0.9f)
+                                    title = "Quiz",
+                                    subtitle = "${overview.totalQuizzes} available",
+                                    icon = Icons.Rounded.Quiz,
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    onClick = onNavigateToQuiz,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
@@ -159,6 +161,31 @@ fun HiveDashboardScreen(
                             }
                         }
 
+                        // Import Action
+                        item {
+                            Surface(
+                                onClick = onNavigateToAddMaterial,
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp)
+                                    .fillMaxWidth(),
+                                shape = MaterialTheme.shapes.extraLarge,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(24.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(32.dp))
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
+                                        Text("Import Material", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                        Text("Add PDF, images, or text", style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+                        }
+
                         // Statistics Card
                         item {
                             SectionHeader(title = "Analytics", icon = Icons.Default.BarChart)
@@ -168,7 +195,7 @@ fun HiveDashboardScreen(
                                 recentReviews = overview.recentReviewsCount,
                                 onConceptsClick = onNavigateToConcepts,
                                 onReviewsClick = onNavigateToReviews,
-                                onMaterialsClick = onNavigateToMaterials // Add this
+                                onMaterialsClick = onNavigateToMaterials
                             )
                         }
                     }
@@ -399,7 +426,7 @@ fun MetricsGrid(
     recentReviews: Int,
     onConceptsClick: () -> Unit,
     onReviewsClick: () -> Unit,
-    onMaterialsClick: () -> Unit // Add this
+    onMaterialsClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -417,7 +444,7 @@ fun MetricsGrid(
             label = "Docs", 
             value = totalMaterials.toString(), 
             icon = Icons.Default.Description, 
-            modifier = Modifier.weight(1f).clickable(onClick = onMaterialsClick) // Add this
+            modifier = Modifier.weight(1f).clickable(onClick = onMaterialsClick)
         )
         MetricSmallCard(
             label = "Reviews", 

@@ -25,6 +25,15 @@ interface QuizDao {
     @Query("SELECT * FROM quizzes WHERE quizId = :quizId")
     suspend fun getQuizWithQuestions(quizId: String): QuizWithQuestions?
 
+    @Transaction
+    @Query("""
+        SELECT q.* FROM quizzes q
+        INNER JOIN concepts c ON q.conceptId = c.conceptId
+        WHERE c.hiveId = :hiveId
+        ORDER BY q.createdAt DESC
+    """)
+    suspend fun getQuizzesWithQuestionsForHive(hiveId: String): List<QuizWithQuestions>
+
     @Query("SELECT * FROM quiz_questions WHERE quizId = :quizId")
     suspend fun getQuestionsForQuiz(quizId: String): List<QuizQuestionEntity>
 

@@ -10,7 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Hive
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material3.*
@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Hive
@@ -35,7 +36,6 @@ fun HiveListScreen(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
     
-    // Expanded state for the FAB
     val isFabExpanded by remember {
         derivedStateOf { listState.firstVisibleItemIndex == 0 }
     }
@@ -43,7 +43,7 @@ fun HiveListScreen(
     LaunchedEffect(state.selectedHiveId) {
         state.selectedHiveId?.let { hiveId ->
             onHiveSelected(hiveId)
-            viewModel.onEvent(HiveListEvent.ClearSelectedHive) // clear after consuming
+            viewModel.onEvent(HiveListEvent.ClearSelectedHive)
         }
     }
 
@@ -54,12 +54,12 @@ fun HiveListScreen(
                 title = { 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("EduHive", fontWeight = FontWeight.Black)
-                        Spacer(Modifier.width(8.dp))
-                        Icon(Icons.Default.Hive, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Icon(Icons.Rounded.School, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* TODO: Implement search */ }) {
+                    IconButton(onClick = { /* Search */ }) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
                     }
                 },
@@ -85,7 +85,7 @@ fun HiveListScreen(
             when {
                 state.isLoading && state.hives.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        CircularProgressIndicator(strokeWidth = 3.dp)
                     }
                 }
 
@@ -100,7 +100,7 @@ fun HiveListScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 80.dp, top = 8.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(state.hives, key = { it.id }) { hive ->
@@ -113,7 +113,6 @@ fun HiveListScreen(
                 }
             }
 
-            // Error Message
             AnimatedVisibility(
                 visible = state.error != null,
                 enter = fadeIn(),
@@ -135,7 +134,6 @@ fun HiveListScreen(
             }
         }
 
-        // Use BottomSheet for creation for a more expressive mobile feel
         if (state.showCreateDialog) {
             CreateHiveBottomSheet(
                 onDismiss = { viewModel.onEvent(HiveListEvent.HideCreateDialog) },
@@ -195,7 +193,7 @@ fun HiveCardExpressive(
                     shape = MaterialTheme.shapes.medium
                 ) {
                     Icon(
-                        Icons.Default.Hive,
+                        Icons.Rounded.School,
                         contentDescription = null,
                         modifier = Modifier.padding(8.dp).size(24.dp),
                         tint = MaterialTheme.colorScheme.onSecondaryContainer
@@ -204,9 +202,7 @@ fun HiveCardExpressive(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
-            
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-            
             Spacer(modifier = Modifier.height(12.dp))
             
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -218,7 +214,7 @@ fun HiveCardExpressive(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Last active: ${formatLastAccessed(hive.lastAccessedAt)}",
+                    text = "Active ${formatLastAccessed(hive.lastAccessedAt)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -242,10 +238,7 @@ fun EmptyHivesState(
             modifier = Modifier.size(120.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = "🐝",
-                    style = MaterialTheme.typography.displayLarge
-                )
+                Icon(Icons.Rounded.School, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
@@ -257,10 +250,10 @@ fun EmptyHivesState(
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Create a hive to start your learning journey with EduHive AI.",
+            text = "Create a study hive to start turning your materials into intelligence.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(40.dp))
         Button(
@@ -270,7 +263,7 @@ fun EmptyHivesState(
         ) {
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(modifier = Modifier.width(12.dp))
-            Text("Create New Hive", style = MaterialTheme.typography.titleMedium)
+            Text("Initialize New Hive", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -308,7 +301,7 @@ fun CreateHiveBottomSheet(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Hive Name") },
-                placeholder = { Text("e.g. Biology 101, Space Exploration") },
+                placeholder = { Text("e.g. Physics Core Concepts") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 singleLine = true
@@ -319,7 +312,7 @@ fun CreateHiveBottomSheet(
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("Description (optional)") },
+                label = { Text("Goal or Description") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 minLines = 3
@@ -338,7 +331,7 @@ fun CreateHiveBottomSheet(
                 enabled = name.isNotBlank(),
                 shape = MaterialTheme.shapes.large
             ) {
-                Text("Create Hive", style = MaterialTheme.typography.titleMedium)
+                Text("Establish Hive", style = MaterialTheme.typography.titleMedium)
             }
         }
     }

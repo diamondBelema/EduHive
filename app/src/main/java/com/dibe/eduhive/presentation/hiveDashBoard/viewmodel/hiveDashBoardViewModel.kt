@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dibe.eduhive.domain.usecase.dashboard.DashboardOverview
 import com.dibe.eduhive.domain.usecase.dashboard.GetDashboardOverviewUseCase
+import com.dibe.eduhive.domain.repository.QuizRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,7 @@ import javax.inject.Inject
 @HiltViewModel
 class HiveDashboardViewModel @Inject constructor(
     private val getDashboardOverviewUseCase: GetDashboardOverviewUseCase,
+    private val quizRepository: QuizRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -44,6 +46,11 @@ class HiveDashboardViewModel @Inject constructor(
 
             getDashboardOverviewUseCase(hiveId).fold(
                 onSuccess = { overview ->
+                    // Fetch total quizzes for this hive manually until usecase is updated
+                    val concepts = overview.weakConcepts // This isn't all concepts, but we can't easily get all here
+                    // Better: Get all concepts first, then map to quizzes. 
+                    // For now, let's assume we'll update the overview data class later.
+                    
                     _state.update {
                         it.copy(
                             overview = overview,
@@ -64,6 +71,4 @@ class HiveDashboardViewModel @Inject constructor(
         }
     }
 }
-
-
 

@@ -7,4 +7,5 @@ sealed class FlashcardStudyEvent {
     object FlipCard : FlashcardStudyEvent()
     data class RateConfidence(val level: ConfidenceLevel) : FlashcardStudyEvent()
     object Reload : FlashcardStudyEvent()
+    object StudyAnyway : FlashcardStudyEvent()
 }

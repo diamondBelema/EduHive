@@ -12,13 +12,14 @@ interface QuizRepository {
 
     suspend fun getQuizzesForConcept(conceptId: String): List<Quiz>
 
+    suspend fun getQuizzesForHive(hiveId: String): List<Quiz>
+
     suspend fun getQuizById(quizId: String): Quiz?
 
     suspend fun getQuestionsForQuiz(quizId: String): List<QuizQuestion>
 
     /**
      * Get quiz with all its questions in a single query.
-     * More efficient than separate calls.
      */
     suspend fun getQuizWithQuestions(quizId: String): Pair<Quiz, List<QuizQuestion>>?
 

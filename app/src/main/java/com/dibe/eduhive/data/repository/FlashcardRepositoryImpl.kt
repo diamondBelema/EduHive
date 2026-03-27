@@ -62,6 +62,10 @@ class FlashcardRepositoryImpl @Inject constructor(
         localDataSource.deleteById(flashcardId)
     }
 
+    override suspend fun deleteAllFlashcardsForConcept(conceptId: String) {
+        localDataSource.deleteAllForConcept(conceptId)
+    }
+
     /**
      * 🚀 STREAMING: Generate flashcards with real-time status updates.
      */

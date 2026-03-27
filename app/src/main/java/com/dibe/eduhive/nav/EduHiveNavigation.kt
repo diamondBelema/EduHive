@@ -124,7 +124,8 @@ fun EduHiveNavigation(
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToReviews = { navController.navigate(Screen.ReviewList.createRoute(hiveId)) },
                 onNavigateToMaterials = { navController.navigate(Screen.MaterialList.createRoute(hiveId)) },
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToQuiz = { navController.navigate(Screen.QuizStudy.createRoute(hiveId)) }
             )
         }
 
@@ -169,7 +170,7 @@ fun EduHiveNavigation(
         ) {
             val quizPairs = androidx.compose.runtime.remember { contentHolder.consume().second }
             QuizStudyScreen(
-                quizPairs = quizPairs,
+                initialQuizPairs = quizPairs,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

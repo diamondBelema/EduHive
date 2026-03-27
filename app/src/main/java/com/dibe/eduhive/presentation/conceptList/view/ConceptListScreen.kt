@@ -25,6 +25,7 @@ import com.dibe.eduhive.domain.model.Concept
 import com.dibe.eduhive.domain.model.Flashcard
 import com.dibe.eduhive.domain.model.Quiz
 import com.dibe.eduhive.domain.model.QuizQuestion
+import com.dibe.eduhive.presentation.addMaterial.view.ProcessingStateExpressive
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListEvent
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListState
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListViewModel
@@ -391,15 +392,16 @@ private fun GenerationActionBar(
                     enabled = !isGenerating,
                     modifier = Modifier.weight(1f)
                 )
-                GenerateChip(
-                    label = "Both",
-                    icon = Icons.Rounded.AutoAwesome,
-                    onClick = { onGenerate(GenerationMode.BOTH) },
-                    enabled = !isGenerating,
-                    modifier = Modifier.weight(1f),
-                    filled = true
-                )
             }
+
+            GenerateChip(
+                label = "Generate Both",
+                icon = Icons.Rounded.AutoAwesome,
+                onClick = { onGenerate(GenerationMode.BOTH) },
+                enabled = !isGenerating,
+                modifier = Modifier.fillMaxWidth(),
+                filled = true
+            )
         }
     }
 }
@@ -422,7 +424,12 @@ private fun GenerateChip(
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     } else {
         OutlinedButton(
@@ -433,7 +440,12 @@ private fun GenerateChip(
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -447,22 +459,23 @@ private fun GeneratingOverlay(
     message: String,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier.padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp)
-    ) {
-        CircularProgressIndicator(strokeWidth = 3.dp)
-        Text(
-            message,
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "The on-device AI is working...",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline
+    val progress = message
+        .substringAfterLast(" ", "")
+        .removeSuffix("%")
+        .toIntOrNull()
+        ?.coerceIn(0, 100)
+        ?.div(100f)
+        ?: 0.6f
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        // Reuse expressive loading UI from material import for consistent app feel.
+        ProcessingStateExpressive(
+            status = message,
+            progress = progress,
+            successMessage = null,
+            flashcardsValid = 0,
+            flashcardsRejected = 0,
+            duplicatesFound = 0
         )
     }
 }
