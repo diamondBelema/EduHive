@@ -24,10 +24,12 @@ class GlobalTaskManager @Inject constructor(
         workManager.getWorkInfosByTagLiveData("flashcard_generation").asFlow(),
         workManager.getWorkInfosByTagLiveData("quiz_generation").asFlow()
     ) { materials, flashcards, quizzes ->
-        val allInfos = (materials ?: emptyList()) + (flashcards ?: emptyList()) + (quizzes ?: emptyList())
+        val allInfos = materials + flashcards + quizzes
         
         allInfos
-            .filter { it.state == WorkInfo.State.RUNNING }
+            .filter { info ->
+                info.state == WorkInfo.State.ENQUEUED || info.state == WorkInfo.State.RUNNING
+            }
             .map { info ->
                 val type = when {
                     info.tags.contains("material_processing") -> TaskType.MATERIAL
@@ -35,23 +37,48 @@ class GlobalTaskManager @Inject constructor(
                     info.tags.contains("quiz_generation") -> TaskType.QUIZ
                     else -> TaskType.UNKNOWN
                 }
-                
-                // Extract hiveId from input data (it's always passed in)
-                val hiveId = info.progress.getString(MaterialProcessingWorker.KEY_HIVE_ID) 
-                    ?: info.progress.getString(FlashcardGenerationWorker.KEY_HIVE_ID)
-                    ?: info.id.toString() // Fallback
 
-                val progress = info.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 
-                    info.progress.getInt(FlashcardGenerationWorker.KEY_COMPLETED, 0))
-                val total = info.progress.getInt(FlashcardGenerationWorker.KEY_TOTAL, 100)
-                
-                val status = info.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Queued..."
-                val title = info.progress.getString(MaterialProcessingWorker.KEY_TITLE) ?: when(type) {
-                    TaskType.MATERIAL -> "Adding Material"
+                // Workers always receive hiveId through inputData; progress can be empty early on.
+                val hiveId = info.progress.getString(MaterialProcessingWorker.KEY_HIVE_ID)
+                    ?: info.progress.getString(FlashcardGenerationWorker.KEY_HIVE_ID)
+                    ?: info.outputData.getString(MaterialProcessingWorker.KEY_HIVE_ID)
+                    ?: info.outputData.getString(FlashcardGenerationWorker.KEY_HIVE_ID)
+                    ?: info.id.toString()
+
+                val (progress, total) = when (type) {
+                    TaskType.MATERIAL -> {
+                        val p = info.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0)
+                        p to 100
+                    }
+                    TaskType.FLASHCARD -> {
+                        val completed = info.progress.getInt(FlashcardGenerationWorker.KEY_COMPLETED, 0)
+                        val expected = info.progress.getInt(FlashcardGenerationWorker.KEY_TOTAL, 0)
+                        completed to expected
+                    }
+                    TaskType.QUIZ -> {
+                        val completed = info.progress.getInt(QuizGenerationWorker.KEY_COMPLETED, 0)
+                        val expected = info.progress.getInt(QuizGenerationWorker.KEY_TOTAL, 0)
+                        completed to expected
+                    }
+                    TaskType.UNKNOWN -> 0 to 100
+                }
+
+                val title = when (type) {
+                    TaskType.MATERIAL -> {
+                        val materialTitle = info.progress.getString(MaterialProcessingWorker.KEY_TITLE)
+                        if (materialTitle.isNullOrBlank()) "Adding Material" else "Adding $materialTitle"
+                    }
                     TaskType.FLASHCARD -> "Generating Flashcards"
                     TaskType.QUIZ -> "Generating Quiz"
-                    else -> "Background Task"
+                    TaskType.UNKNOWN -> "Background Task"
                 }
+
+                val status = info.progress.getString(MaterialProcessingWorker.KEY_STATUS)
+                    ?: when (info.state) {
+                        WorkInfo.State.ENQUEUED -> "Queued..."
+                        WorkInfo.State.RUNNING -> "Running..."
+                        else -> "Queued..."
+                    }
 
                 TaskProgress(
                     id = info.id.toString(),
@@ -59,8 +86,8 @@ class GlobalTaskManager @Inject constructor(
                     type = type,
                     title = title,
                     status = status,
-                    progress = if (total > 0) progress.toFloat() / total else progress.toFloat() / 100,
-                    isIndeterminate = progress == 0 && total == 0
+                    progress = if (total > 0) progress.toFloat() / total else 0f,
+                    isIndeterminate = info.state == WorkInfo.State.ENQUEUED || total <= 0
                 )
             }
     }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())

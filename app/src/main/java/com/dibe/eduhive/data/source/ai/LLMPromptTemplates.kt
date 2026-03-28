@@ -228,4 +228,34 @@ Now continue with QUESTION 1.
         }
         return basePrompt + suffix
     }
+
+    fun groundedChat(question: String, contextChunks: List<GroundedContextChunk>): String {
+        val chunkBlock = contextChunks.joinToString("\n\n") { chunk ->
+            """
+CHUNK ${chunk.index}
+MATERIAL: ${chunk.materialTitle}
+SOURCE_CHUNK_INDEX: ${chunk.chunkIndex}
+TEXT: ${chunk.text}
+            """.trimIndent()
+        }
+
+        return """
+You are EduHive's grounded study assistant.
+
+Answer the question using ONLY the provided chunks.
+If context is incomplete, still give the best possible answer but say uncertainty clearly.
+Never invent source references.
+
+Question:
+$question
+
+Context Chunks:
+$chunkBlock
+
+Return EXACT format:
+ANSWER: <your response in 3-7 sentences>
+CONFIDENCE: <HIGH|MEDIUM|LOW>
+CITATIONS: <comma-separated chunk numbers like 1,3; use NONE if no support>
+        """.trimIndent()
+    }
 }

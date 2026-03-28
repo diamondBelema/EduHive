@@ -45,13 +45,14 @@ fun AddMaterialScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-
-    // Observe background work via Flow — no LiveData dependency needed
+    
+    // Use Flow instead of LiveData to resolve 'observeAsState' error and follow best practices
     val workManager = remember { WorkManager.getInstance(context) }
-    val activeWorkInfos by workManager.getWorkInfosByTagFlow("material_processing")
+    val activeWorkInfo by workManager.getWorkInfosByTagFlow("material_processing")
         .collectAsStateWithLifecycle(initialValue = emptyList())
-
-    val currentWork = activeWorkInfos.firstOrNull {
+    
+    // Find the latest running work
+    val currentWork = activeWorkInfo.firstOrNull { 
         it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
     }
 
@@ -93,12 +94,12 @@ fun AddMaterialScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = {
+                title = { 
                     Text(
-                        "Import Knowledge",
+                        "Import Knowledge", 
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge
-                    )
+                    ) 
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -118,14 +119,14 @@ fun AddMaterialScreen(
                 targetState = currentWork != null,
                 transitionSpec = {
                     fadeIn(tween(500)) + scaleIn(initialScale = 0.92f) togetherWith
-                            fadeOut(tween(400)) + scaleOut(targetScale = 0.95f)
+                    fadeOut(tween(400)) + scaleOut(targetScale = 0.95f)
                 },
                 label = "processing_transition"
             ) { isProcessing ->
                 if (isProcessing && currentWork != null) {
                     val progress = currentWork.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0) / 100f
                     val status = currentWork.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Queued..."
-
+                    
                     ProcessingStateExpressive(
                         status = status,
                         progress = progress,
@@ -177,7 +178,7 @@ fun ImportSelectionExpressive(
             lineHeight = 36.sp,
             color = MaterialTheme.colorScheme.onSurface
         )
-
+        
         ImportCardExpressive(
             title = "Document or PDF",
             subtitle = "Books, research papers, notes",
@@ -195,7 +196,7 @@ fun ImportSelectionExpressive(
         )
 
         Spacer(modifier = Modifier.weight(1f))
-
+        
         Surface(
             color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
             shape = MaterialTheme.shapes.extraLarge,
@@ -212,8 +213,8 @@ fun ImportSelectionExpressive(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Rounded.AutoAwesome,
-                            contentDescription = null,
+                            Icons.Rounded.AutoAwesome, 
+                            contentDescription = null, 
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -241,7 +242,7 @@ fun ImportCardExpressive(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
+        targetValue = if (isPressed) 0.96f else 1f, 
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
         label = "scale"
     )
@@ -272,14 +273,14 @@ fun ImportCardExpressive(
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(
-                    title,
-                    style = MaterialTheme.typography.titleLarge,
+                    title, 
+                    style = MaterialTheme.typography.titleLarge, 
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    subtitle, 
+                    style = MaterialTheme.typography.bodyMedium, 
                     color = LocalContentColor.current.copy(alpha = 0.7f)
                 )
             }
@@ -317,7 +318,7 @@ fun ProcessingStateExpressive(
                 strokeWidth = 12.dp,
                 strokeCap = StrokeCap.Round
             )
-
+            
             CircularProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier.size(240.dp),
@@ -325,7 +326,7 @@ fun ProcessingStateExpressive(
                 strokeCap = StrokeCap.Round,
                 color = MaterialTheme.colorScheme.primary
             )
-
+            
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 AnimatedContent(
                     targetState = successMessage != null,
@@ -336,8 +337,8 @@ fun ProcessingStateExpressive(
                 ) { isDone ->
                     if (isDone) {
                         Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = null,
+                            Icons.Rounded.Check, 
+                            contentDescription = null, 
                             modifier = Modifier.size(80.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -370,7 +371,7 @@ fun ProcessingStateExpressive(
                     )
                     Spacer(Modifier.width(12.dp))
                 }
-
+                
                 Text(
                     text = if (successMessage != null) "Complete!" else status,
                     style = MaterialTheme.typography.labelLarge,
@@ -379,7 +380,7 @@ fun ProcessingStateExpressive(
                 )
             }
         }
-
+        
         AnimatedVisibility(
             visible = successMessage != null,
             enter = slideInVertically { it / 2 } + fadeIn()
@@ -424,19 +425,19 @@ fun TitleEntryBottomSheet(
                 .padding(bottom = 48.dp, top = 8.dp)
         ) {
             Text(
-                "Name this Material",
-                style = MaterialTheme.typography.headlineSmall,
+                "Name this Material", 
+                style = MaterialTheme.typography.headlineSmall, 
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Give your knowledge source a clear name for your hive.",
-                style = MaterialTheme.typography.bodyMedium,
+                "Give your knowledge source a clear name for your hive.", 
+                style = MaterialTheme.typography.bodyMedium, 
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
+            
             Spacer(Modifier.height(24.dp))
-
+            
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
@@ -449,15 +450,13 @@ fun TitleEntryBottomSheet(
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
             )
-
+            
             Spacer(Modifier.height(32.dp))
-
+            
             Button(
                 onClick = { if (title.isNotBlank()) onConfirm(title) },
                 enabled = title.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = MaterialTheme.shapes.large,
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
             ) {

@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.History
@@ -49,6 +51,7 @@ fun HiveDashboardScreen(
     onNavigateToConcepts: () -> Unit,
     onNavigateToReviews: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToChat: () -> Unit,
     onNavigateToMaterials: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
@@ -96,13 +99,13 @@ fun HiveDashboardScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    if (state.activeTasks.isNotEmpty()) {
-                        BadgedBox(
-                            badge = {
+                    BadgedBox(
+                        badge = {
+                            if (state.activeTasks.isNotEmpty()) {
                                 Badge {
                                     Text(
                                         text = state.activeTasks.size.toString(),
@@ -110,13 +113,13 @@ fun HiveDashboardScreen(
                                     )
                                 }
                             }
-                        ) {
-                            IconButton(onClick = { showTaskMonitor = true }) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AutoAwesome,
-                                    contentDescription = "Running tasks"
-                                )
-                            }
+                        }
+                    ) {
+                        IconButton(onClick = { showTaskMonitor = true }) {
+                            Icon(
+                                imageVector = Icons.Outlined.History,
+                                contentDescription = "Task monitor"
+                            )
                         }
                     }
                     IconButton(onClick = onNavigateToSettings) {
@@ -183,6 +186,18 @@ fun HiveDashboardScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                             }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            ActionCardExpressive(
+                                title = "Ask Hive",
+                                subtitle = "Chat with your docs",
+                                icon = Icons.AutoMirrored.Outlined.Chat,
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                onClick = onNavigateToChat,
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp)
+                                    .fillMaxWidth()
+                            )
                         }
 
                         // Weak Concepts with "Needs Focus" styling

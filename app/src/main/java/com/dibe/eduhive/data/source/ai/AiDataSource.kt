@@ -33,8 +33,13 @@ class AIDataSource @Inject constructor(
     companion object {
         private const val TAG = "AIDataSource"
 
-        /** Minimum flashcard pass rate before triggering a refinement pass. */
-        private const val MIN_PASS_RATE = 0.5f   // Lowered from 0.7 — see Fix notes
+        /**
+         * Minimum flashcard pass rate before triggering a refinement pass.
+         * Lowered to 0.35 — on small models (135M/270M) the refinement pass rarely
+         * produces better output than the first attempt, so we only pay for it when
+         * quality is genuinely terrible. On 1B it still fires when needed.
+         */
+        private const val MIN_PASS_RATE = 0.35f
 
         /**
          * Maximum concepts per batched flashcard request.
@@ -123,11 +128,13 @@ class AIDataSource @Inject constructor(
                 allExtractedConcepts.addAll(pageConcepts)
             }.onFailure { e ->
                 failedPages++
-                Log.w(TAG, "Page $index failed (${failedPages}/$totalPages failures): ${e.message}")
-                // Reinitialise the engine before the next page
-                modelManager.unloadModel()
-                delay(300)
-                ensureModelLoaded(GenerationConfig.CONCEPT_EXTRACTION)
+                Log.w(TAG, "Page $index failed ($failedPages/$totalPages): ${e.message}")
+                // Only reload if the engine itself crashed — a bad generation output
+                // doesn't mean the engine is broken, and a full reload costs 3–5s.
+                if (!modelManager.isModelLoaded()) {
+                    delay(300)
+                    ensureModelLoaded(GenerationConfig.CONCEPT_EXTRACTION)
+                }
             }
         }
 
@@ -319,6 +326,30 @@ class AIDataSource @Inject constructor(
             val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, safeFacts, questionCount)
             val response = modelManager.generate(prompt).getOrThrow()
             Result.success(parseQuizFromResponse(response))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Grounded document chat (Phase 1)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun answerQuestionFromContext(
+        question: String,
+        contextChunks: List<GroundedContextChunk>
+    ): Result<GroundedAnswer> = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureModelLoaded(GenerationConfig.QUIZ)) {
+                return@withContext Result.failure(IllegalStateException("No model available"))
+            }
+            if (contextChunks.isEmpty()) {
+                return@withContext Result.failure(IllegalArgumentException("No context chunks provided"))
+            }
+
+            val prompt = LLMPromptTemplates.groundedChat(question, contextChunks)
+            val response = modelManager.generate(prompt).getOrThrow()
+            Result.success(parseGroundedAnswer(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -645,6 +676,47 @@ class AIDataSource @Inject constructor(
         return questions
     }
 
+    private fun parseGroundedAnswer(response: String): GroundedAnswer {
+        val answerLine = response
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("ANSWER:", ignoreCase = true) }
+            ?.substringAfter(":")
+            ?.trim()
+
+        val confidence = response
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("CONFIDENCE:", ignoreCase = true) }
+            ?.substringAfter(":")
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it in setOf("HIGH", "MEDIUM", "LOW") }
+            ?: "LOW"
+
+        val citationLine = response
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("CITATIONS:", ignoreCase = true) }
+            ?.substringAfter(":")
+            ?.trim()
+            .orEmpty()
+
+        val citationIndexes = if (citationLine.equals("NONE", ignoreCase = true)) {
+            emptyList()
+        } else {
+            Regex("\\d+")
+                .findAll(citationLine)
+                .mapNotNull { it.value.toIntOrNull() }
+                .toList()
+        }
+
+        return GroundedAnswer(
+            answer = answerLine
+                ?.takeIf { it.isNotBlank() }
+                ?: response.trim().lines().firstOrNull().orEmpty(),
+            confidence = confidence,
+            citationIndexes = citationIndexes
+        )
+    }
+
     /**
      * Normalize the CORRECT: field to a single uppercase letter (A, B, C, D).
      * Handles: bare letter, True/False text, full option text match.
@@ -675,6 +747,19 @@ class AIDataSource @Inject constructor(
 
     suspend fun chat(message: String): Result<String> = modelManager.generate(message)
 }
+
+data class GroundedContextChunk(
+    val index: Int,
+    val materialTitle: String,
+    val chunkIndex: Int,
+    val text: String
+)
+
+data class GroundedAnswer(
+    val answer: String,
+    val confidence: String,
+    val citationIndexes: List<Int>
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data and state classes (unchanged)

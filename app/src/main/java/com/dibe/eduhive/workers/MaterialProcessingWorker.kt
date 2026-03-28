@@ -16,7 +16,6 @@ import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.delay
 import java.util.UUID
 
 @HiltWorker
@@ -45,7 +44,14 @@ class MaterialProcessingWorker @AssistedInject constructor(
 
         try {
             // 1. Extract text pages
-            setProgress(workDataOf(KEY_STATUS to "Extracting text...", KEY_PROGRESS to 10))
+            setProgress(
+                workDataOf(
+                    KEY_HIVE_ID to hiveId,
+                    KEY_TITLE to title,
+                    KEY_STATUS to "Extracting text...",
+                    KEY_PROGRESS to 10
+                )
+            )
             postNotification("Processing \"$title\"", "Extracting text...", 10)
 
             val extractedPages = fileDataSource.extractTextPages(uri).getOrElse { error ->
@@ -70,10 +76,24 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 createdAt = System.currentTimeMillis()
             )
             materialRepository.addMaterial(material)
-            setProgress(workDataOf(KEY_STATUS to "Material saved", KEY_PROGRESS to 20))
+            setProgress(
+                workDataOf(
+                    KEY_HIVE_ID to hiveId,
+                    KEY_TITLE to title,
+                    KEY_STATUS to "Material saved",
+                    KEY_PROGRESS to 20
+                )
+            )
 
             // 3. Extract concepts
-            setProgress(workDataOf(KEY_STATUS to "Analyzing content...", KEY_PROGRESS to 30))
+            setProgress(
+                workDataOf(
+                    KEY_HIVE_ID to hiveId,
+                    KEY_TITLE to title,
+                    KEY_STATUS to "Analyzing content...",
+                    KEY_PROGRESS to 30
+                )
+            )
             postNotification("Processing \"$title\"", "Analyzing content...", 30)
 
             var extractedConceptsList: List<com.dibe.eduhive.domain.model.Concept>? = null
@@ -84,7 +104,14 @@ class MaterialProcessingWorker @AssistedInject constructor(
             ).collect { progress ->
                 if (progress is ConceptExtractionProgress.Processing) {
                     val p = 30 + (progress.percent * 0.3).toInt()
-                    setProgress(workDataOf(KEY_PROGRESS to p, KEY_STATUS to "Analyzing... ${progress.percent}%"))
+                    setProgress(
+                        workDataOf(
+                            KEY_HIVE_ID to hiveId,
+                            KEY_TITLE to title,
+                            KEY_PROGRESS to p,
+                            KEY_STATUS to "Analyzing... ${progress.percent}%"
+                        )
+                    )
                     postNotification("Processing \"$title\"", "Analyzing... ${progress.percent}%", p)
                 } else if (progress is ConceptExtractionProgress.Success) {
                     extractedConceptsList = progress.concepts
@@ -103,6 +130,8 @@ class MaterialProcessingWorker @AssistedInject constructor(
             finalConcepts.forEachIndexed { index, concept ->
                 val conceptProgress = 60 + ((index.toFloat() / totalConcepts) * 35).toInt()
                 setProgress(workDataOf(
+                    KEY_HIVE_ID to hiveId,
+                    KEY_TITLE to title,
                     KEY_STATUS to "Generating cards for ${concept.name}",
                     KEY_PROGRESS to conceptProgress
                 ))
@@ -122,12 +151,18 @@ class MaterialProcessingWorker @AssistedInject constructor(
                         totalValid += progress.flashcards.size
                     }
                 }
-                delay(50)
             }
 
             // 5. Finalize
             materialRepository.markAsProcessed(material.id)
-            setProgress(workDataOf(KEY_PROGRESS to 100, KEY_STATUS to "Complete"))
+            setProgress(
+                workDataOf(
+                    KEY_HIVE_ID to hiveId,
+                    KEY_TITLE to title,
+                    KEY_PROGRESS to 100,
+                    KEY_STATUS to "Complete"
+                )
+            )
 
             // Replace progress notification with a completion notification
             val completionNotification = NotificationHelper.getBaseNotification(

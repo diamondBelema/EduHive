@@ -34,7 +34,7 @@ class ConceptListViewModel @Inject constructor(
     private val quizRepository: QuizRepository,
     private val backgroundGenerationManager: BackgroundGenerationManager,
     private val workManager: WorkManager,
-    savedStateHandle: SavedStateHandle
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     private val hiveId: String = checkNotNull(savedStateHandle["hiveId"])
@@ -44,6 +44,37 @@ class ConceptListViewModel @Inject constructor(
 
     init {
         loadConcepts()
+        reattachPendingWork()
+    }
+
+    /**
+     * Re-attach observers for any WorkManager jobs that were running when the
+     * ViewModel was last destroyed (e.g. user navigated away mid-generation).
+     * Work IDs are persisted in SavedStateHandle so they survive ViewModel recreation.
+     */
+    private fun reattachPendingWork() {
+        val conceptIds = savedStateHandle.get<Array<String>>(KEY_PENDING_CONCEPT_IDS)
+            ?.toList() ?: return // nothing was pending
+
+        val flashId = savedStateHandle.get<String>(KEY_PENDING_FLASH_WORK_ID)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val quizId = savedStateHandle.get<String>(KEY_PENDING_QUIZ_WORK_ID)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+
+        when {
+            flashId != null && quizId != null -> {
+                _state.update { it.copy(isGenerating = true, generationProgress = "Resuming generation...") }
+                observeBothWork(flashId, quizId, conceptIds)
+            }
+            flashId != null -> {
+                _state.update { it.copy(isGenerating = true, generationProgress = "Resuming flashcard generation...") }
+                observeFlashcardWork(flashId, conceptIds, GenerationMode.FLASHCARDS)
+            }
+            quizId != null -> {
+                _state.update { it.copy(isGenerating = true, generationProgress = "Resuming quiz generation...") }
+                observeQuizWork(quizId, conceptIds, GenerationMode.QUIZ)
+            }
+        }
     }
 
     fun onEvent(event: ConceptListEvent) {
@@ -117,15 +148,22 @@ class ConceptListViewModel @Inject constructor(
         when (mode) {
             GenerationMode.FLASHCARDS -> {
                 val workId = backgroundGenerationManager.scheduleFlashcardGeneration(hiveId, conceptIds)
+                savedStateHandle[KEY_PENDING_FLASH_WORK_ID] = workId.toString()
+                savedStateHandle[KEY_PENDING_CONCEPT_IDS] = conceptIds.toTypedArray()
                 observeFlashcardWork(workId, conceptIds, mode)
             }
             GenerationMode.QUIZ -> {
                 val workId = backgroundGenerationManager.scheduleQuizGeneration(hiveId, conceptIds)
+                savedStateHandle[KEY_PENDING_QUIZ_WORK_ID] = workId.toString()
+                savedStateHandle[KEY_PENDING_CONCEPT_IDS] = conceptIds.toTypedArray()
                 observeQuizWork(workId, conceptIds, mode)
             }
             GenerationMode.BOTH -> {
                 val flashWorkId = backgroundGenerationManager.scheduleFlashcardGeneration(hiveId, conceptIds)
                 val quizWorkId = backgroundGenerationManager.scheduleQuizGeneration(hiveId, conceptIds)
+                savedStateHandle[KEY_PENDING_FLASH_WORK_ID] = flashWorkId.toString()
+                savedStateHandle[KEY_PENDING_QUIZ_WORK_ID] = quizWorkId.toString()
+                savedStateHandle[KEY_PENDING_CONCEPT_IDS] = conceptIds.toTypedArray()
                 observeBothWork(flashWorkId, quizWorkId, conceptIds)
             }
         }
@@ -141,6 +179,7 @@ class ConceptListViewModel @Inject constructor(
                         _state.update { it.copy(generationProgress = "Generating flashcards: $completed/$total") }
                     }
                     WorkInfo.State.SUCCEEDED -> {
+                        clearPendingWorkState()
                         val flashcards = conceptIds.flatMap { conceptId ->
                             flashcardRepository.getFlashcardsForConcept(conceptId)
                         }
@@ -154,6 +193,7 @@ class ConceptListViewModel @Inject constructor(
                         }
                     }
                     WorkInfo.State.FAILED -> {
+                        clearPendingWorkState()
                         _state.update {
                             it.copy(
                                 isGenerating = false,
@@ -178,6 +218,7 @@ class ConceptListViewModel @Inject constructor(
                         _state.update { it.copy(generationProgress = "Generating quiz: $completed/$total") }
                     }
                     WorkInfo.State.SUCCEEDED -> {
+                        clearPendingWorkState()
                         val quizPairs = fetchLatestQuizPairs(conceptIds)
                         _state.update {
                             it.copy(
@@ -189,6 +230,7 @@ class ConceptListViewModel @Inject constructor(
                         }
                     }
                     WorkInfo.State.FAILED -> {
+                        clearPendingWorkState()
                         _state.update {
                             it.copy(
                                 isGenerating = false,
@@ -215,6 +257,7 @@ class ConceptListViewModel @Inject constructor(
 
                     when {
                         flashState == WorkInfo.State.FAILED || quizState == WorkInfo.State.FAILED -> {
+                            clearPendingWorkState()
                             _state.update {
                                 it.copy(
                                     isGenerating = false,
@@ -224,6 +267,7 @@ class ConceptListViewModel @Inject constructor(
                             }
                         }
                         flashState == WorkInfo.State.SUCCEEDED && quizState == WorkInfo.State.SUCCEEDED -> {
+                            clearPendingWorkState()
                             val flashcards = conceptIds.flatMap { conceptId ->
                                 flashcardRepository.getFlashcardsForConcept(conceptId)
                             }
@@ -265,6 +309,12 @@ class ConceptListViewModel @Inject constructor(
         }
     }
 
+    private fun clearPendingWorkState() {
+        savedStateHandle.remove<String>(KEY_PENDING_FLASH_WORK_ID)
+        savedStateHandle.remove<String>(KEY_PENDING_QUIZ_WORK_ID)
+        savedStateHandle.remove<Array<String>>(KEY_PENDING_CONCEPT_IDS)
+    }
+
     private fun clearGenerated() {
         _state.update {
             it.copy(
@@ -273,6 +323,12 @@ class ConceptListViewModel @Inject constructor(
                 generationMode = null
             )
         }
+    }
+
+    companion object {
+        private const val KEY_PENDING_FLASH_WORK_ID = "pendingFlashWorkId"
+        private const val KEY_PENDING_QUIZ_WORK_ID = "pendingQuizWorkId"
+        private const val KEY_PENDING_CONCEPT_IDS = "pendingConceptIds"
     }
 }
 

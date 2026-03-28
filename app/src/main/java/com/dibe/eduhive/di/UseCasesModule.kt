@@ -8,6 +8,7 @@ import com.dibe.eduhive.data.local.database.EduHiveDatabase
 import com.dibe.eduhive.data.repository.*
 import com.dibe.eduhive.data.source.*
 import com.dibe.eduhive.data.source.ai.AIDataSource
+import com.dibe.eduhive.data.source.ai.TextChunker
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.data.source.local.ConceptLocalDataSource
 import com.dibe.eduhive.data.source.local.FlashcardLocalDataSource
@@ -22,6 +23,7 @@ import com.dibe.eduhive.domain.repository.*
 import com.dibe.eduhive.domain.usecase.concept.CreateConceptUseCase
 import com.dibe.eduhive.domain.usecase.concept.GetConceptDetailsUseCase
 import com.dibe.eduhive.domain.usecase.concept.GetConceptsByHiveUseCase
+import com.dibe.eduhive.domain.usecase.chat.AskHiveQuestionUseCase
 import com.dibe.eduhive.domain.usecase.dashboard.GetDashboardOverviewUseCase
 import com.dibe.eduhive.domain.usecase.flashcard.GetFlashcardsForConceptUseCase
 import com.dibe.eduhive.domain.usecase.hive.CreateHiveUseCase
@@ -188,4 +190,17 @@ object UseCaseModule {
     fun provideGetNextReviewItemsUseCase(
         flashcardRepository: FlashcardRepository
     ) = GetNextReviewItemsUseCase(flashcardRepository)
+
+    @Provides
+    fun provideAskHiveQuestionUseCase(
+        materialRepository: MaterialRepository,
+        fileDataSource: FileDataSource,
+        textChunker: TextChunker,
+        aiDataSource: AIDataSource
+    ) = AskHiveQuestionUseCase(
+        materialRepository = materialRepository,
+        fileDataSource = fileDataSource,
+        textChunker = textChunker,
+        aiDataSource = aiDataSource
+    )
 }

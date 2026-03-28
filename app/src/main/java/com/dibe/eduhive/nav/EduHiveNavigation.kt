@@ -6,7 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -17,6 +17,7 @@ import com.dibe.eduhive.presentation.addMaterial.view.AddMaterialScreen
 import com.dibe.eduhive.presentation.conceptList.view.ConceptListScreen
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListViewModel
 import com.dibe.eduhive.presentation.conceptList.viewmodel.GenerationMode
+import com.dibe.eduhive.presentation.documentChat.view.DocumentChatScreen
 import com.dibe.eduhive.presentation.firstTimeSetup.view.FirstTimeSetupScreen
 import com.dibe.eduhive.presentation.flashcardList.view.FlashcardListScreen
 import com.dibe.eduhive.presentation.flashcardStudy.view.FlashcardStudyScreen
@@ -53,6 +54,9 @@ sealed class Screen(val route: String) {
     }
     object MaterialList : Screen("material_list/{hiveId}") {
         fun createRoute(hiveId: String) = "material_list/$hiveId"
+    }
+    object HiveChat : Screen("hive_chat/{hiveId}") {
+        fun createRoute(hiveId: String) = "hive_chat/$hiveId"
     }
     object FlashcardList : Screen("flashcard_list/{conceptId}/{conceptName}") {
         fun createRoute(conceptId: String, conceptName: String) =
@@ -123,10 +127,18 @@ fun EduHiveNavigation(
                 onNavigateToConcepts = { navController.navigate(Screen.ConceptList.createRoute(hiveId)) },
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToReviews = { navController.navigate(Screen.ReviewList.createRoute(hiveId)) },
+                onNavigateToChat = { navController.navigate(Screen.HiveChat.createRoute(hiveId)) },
                 onNavigateToMaterials = { navController.navigate(Screen.MaterialList.createRoute(hiveId)) },
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToQuiz = { navController.navigate(Screen.QuizStudy.createRoute(hiveId)) }
             )
+        }
+
+        composable(
+            route = Screen.HiveChat.route,
+            arguments = listOf(navArgument("hiveId") { type = NavType.StringType })
+        ) {
+            DocumentChatScreen(onNavigateBack = { navController.popBackStack() })
         }
 
         composable(

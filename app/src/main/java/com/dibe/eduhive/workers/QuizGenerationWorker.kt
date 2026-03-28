@@ -28,7 +28,14 @@ class QuizGenerationWorker @AssistedInject constructor(
             ?: return Result.failure(workDataOf(KEY_ERROR to "Missing hiveId"))
 
         val total = conceptIds.size
-        setProgress(workDataOf(KEY_COMPLETED to 0, KEY_TOTAL to total))
+        setProgress(
+            workDataOf(
+                KEY_HIVE_ID to hiveId,
+                KEY_COMPLETED to 0,
+                KEY_TOTAL to total,
+                KEY_STATUS to "Queued..."
+            )
+        )
         postNotification(0, total)
 
         return try {
@@ -46,7 +53,14 @@ class QuizGenerationWorker @AssistedInject constructor(
                 )
 
                 completed++
-                setProgress(workDataOf(KEY_COMPLETED to completed, KEY_TOTAL to total))
+                setProgress(
+                    workDataOf(
+                        KEY_HIVE_ID to hiveId,
+                        KEY_COMPLETED to completed,
+                        KEY_TOTAL to total,
+                        KEY_STATUS to "Generating quiz..."
+                    )
+                )
             }
 
             cancelNotification()
