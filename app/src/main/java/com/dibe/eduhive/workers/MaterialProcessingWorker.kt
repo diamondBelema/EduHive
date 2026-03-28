@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.dibe.eduhive.data.repository.ConceptExtractionProgress
 import com.dibe.eduhive.data.repository.FlashcardGenerationProgress
+import com.dibe.eduhive.data.source.ai.AIDataSource
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.domain.model.Material
 import com.dibe.eduhive.domain.model.MaterialType
@@ -25,7 +26,8 @@ class MaterialProcessingWorker @AssistedInject constructor(
     private val fileDataSource: FileDataSource,
     private val materialRepository: MaterialRepository,
     private val conceptRepository: ConceptRepository,
-    private val flashcardRepository: FlashcardRepository
+    private val flashcardRepository: FlashcardRepository,
+    private val aiDataSource: AIDataSource
 ) : CoroutineWorker(context, params) {
 
     private val notificationManager =
@@ -41,6 +43,9 @@ class MaterialProcessingWorker @AssistedInject constructor(
 
         // Post a plain (non-foreground) progress notification — safe to call from background
         postNotification("Processing \"$title\"", "Starting...", 0)
+
+        // Retain the model for the full pipeline to avoid unload/reload between steps
+        aiDataSource.retainModelForPipeline()
 
         try {
             // 1. Extract text pages
@@ -63,6 +68,9 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 cancelNotification()
                 return Result.failure(workDataOf(KEY_ERROR to "No readable text found"))
             }
+
+            // Detect small/simple documents for fast-track processing
+            val isSmallFile = extractedPages.size < SMALL_FILE_PAGE_THRESHOLD
 
             // 2. Save metadata
             val materialType = detectMaterialType(uri)
@@ -123,34 +131,86 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 return Result.failure(workDataOf(KEY_ERROR to "No concepts extracted"))
             }
 
-            // 4. Generate flashcards
+            // 4. Generate flashcards using batch processing (3 concepts per AI call = 3× speedup)
             var totalValid = 0
+            var totalRejected = 0
             val totalConcepts = finalConcepts.size
+            val batches = finalConcepts.chunked(FLASHCARD_BATCH_SIZE)
 
-            finalConcepts.forEachIndexed { index, concept ->
-                val conceptProgress = 60 + ((index.toFloat() / totalConcepts) * 35).toInt()
-                setProgress(workDataOf(
-                    KEY_HIVE_ID to hiveId,
-                    KEY_TITLE to title,
-                    KEY_STATUS to "Generating cards for ${concept.name}",
-                    KEY_PROGRESS to conceptProgress
-                ))
-                postNotification(
-                    "Processing \"$title\"",
-                    "Generating cards: ${concept.name} (${index + 1}/$totalConcepts)",
-                    conceptProgress
-                )
+            batches.forEachIndexed { batchIndex, batch ->
+                val batchStart = batchIndex * FLASHCARD_BATCH_SIZE + 1
+                val batchEnd = minOf(batchStart + batch.size - 1, totalConcepts)
+                val conceptProgress = 60 + ((batchIndex.toFloat() / batches.size) * 35).toInt()
 
-                flashcardRepository.generateFlashcardsForConceptStreaming(
-                    conceptId = concept.id,
-                    conceptName = concept.name,
-                    conceptDescription = concept.description ?: "",
-                    count = 3
-                ).collect { progress ->
-                    if (progress is FlashcardGenerationProgress.Success) {
-                        totalValid += progress.flashcards.size
-                    }
+                val statusMsg = when {
+                    isSmallFile -> "Concept $batchStart/$totalConcepts: Generating cards (fast mode)..."
+                    batch.size == 1 -> "Concept $batchStart/$totalConcepts: Generating cards for ${batch[0].name}..."
+                    else -> "Concepts $batchStart–$batchEnd/$totalConcepts: Generating cards..."
                 }
+
+                setProgress(
+                    workDataOf(
+                        KEY_HIVE_ID to hiveId,
+                        KEY_TITLE to title,
+                        KEY_STATUS to statusMsg,
+                        KEY_PROGRESS to conceptProgress,
+                        KEY_CURRENT_CONCEPT to batchStart,
+                        KEY_TOTAL_CONCEPTS to totalConcepts,
+                        KEY_VALID_COUNT to totalValid,
+                        KEY_REJECTED_COUNT to totalRejected
+                    )
+                )
+                postNotification("Processing \"$title\"", statusMsg, conceptProgress)
+
+                if (isSmallFile) {
+                    // Fast-track: skip validation, single attempt per concept
+                    batch.forEach { concept ->
+                        flashcardRepository.generateFlashcardsForConceptStreaming(
+                            conceptId = concept.id,
+                            conceptName = concept.name,
+                            conceptDescription = concept.description ?: "",
+                            count = FLASHCARDS_PER_CONCEPT,
+                            skipValidation = true
+                        ).collect { progress ->
+                            when (progress) {
+                                is FlashcardGenerationProgress.Success -> {
+                                    totalValid += progress.flashcards.size
+                                    totalRejected += progress.rejectedCount
+                                }
+                                else -> { /* Loading/Retrying/Validating states need no action here */ }
+                            }
+                        }
+                    }
+                } else {
+                    // Standard path: batch generation (1 AI call for up to 3 concepts)
+                    val conceptTriples = batch.map { concept ->
+                        Triple(concept.id, concept.name, concept.description)
+                    }
+                    val batchFlashcards = flashcardRepository.generateFlashcardsForConceptsBatch(
+                        concepts = conceptTriples,
+                        countPerConcept = FLASHCARDS_PER_CONCEPT
+                    )
+                    totalValid += batchFlashcards.size
+                }
+
+                val afterStatusMsg = when {
+                    isSmallFile -> "Concept $batchEnd/$totalConcepts: ${totalValid} cards so far"
+                    batch.size == 1 -> "Concept $batchStart/$totalConcepts: Done ($totalValid cards)"
+                    else -> "Concepts $batchStart–$batchEnd: Done ($totalValid cards)"
+                }
+                val afterProgress = conceptProgress + (35 / batches.size).coerceAtLeast(1)
+                setProgress(
+                    workDataOf(
+                        KEY_HIVE_ID to hiveId,
+                        KEY_TITLE to title,
+                        KEY_STATUS to afterStatusMsg,
+                        KEY_PROGRESS to afterProgress.coerceAtMost(95),
+                        KEY_CURRENT_CONCEPT to batchEnd,
+                        KEY_TOTAL_CONCEPTS to totalConcepts,
+                        KEY_VALID_COUNT to totalValid,
+                        KEY_REJECTED_COUNT to totalRejected
+                    )
+                )
             }
 
             // 5. Finalize
@@ -160,7 +220,10 @@ class MaterialProcessingWorker @AssistedInject constructor(
                     KEY_HIVE_ID to hiveId,
                     KEY_TITLE to title,
                     KEY_PROGRESS to 100,
-                    KEY_STATUS to "Complete"
+                    KEY_STATUS to "Complete — $totalValid cards created",
+                    KEY_VALID_COUNT to totalValid,
+                    KEY_REJECTED_COUNT to totalRejected,
+                    KEY_TOTAL_CONCEPTS to totalConcepts
                 )
             )
 
@@ -186,6 +249,8 @@ class MaterialProcessingWorker @AssistedInject constructor(
         } catch (e: Exception) {
             cancelNotification()
             return Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Unknown error")))
+        } finally {
+            aiDataSource.releaseModelRef()
         }
     }
 
@@ -223,6 +288,21 @@ class MaterialProcessingWorker @AssistedInject constructor(
         const val KEY_MATERIAL_ID = "materialId"
         const val KEY_CONCEPTS_COUNT = "conceptsCount"
         const val KEY_FLASHCARDS_COUNT = "flashcardsCount"
+
+        // Granular quality metrics surfaced via WorkManager progress data
+        const val KEY_VALID_COUNT = "validCount"
+        const val KEY_REJECTED_COUNT = "rejectedCount"
+        const val KEY_CURRENT_CONCEPT = "currentConcept"
+        const val KEY_TOTAL_CONCEPTS = "totalConcepts"
+
+        /** Files with fewer than this many pages use the fast-track path. */
+        private const val SMALL_FILE_PAGE_THRESHOLD = 5
+
+        /** Concepts grouped per AI call for batch flashcard generation. */
+        private const val FLASHCARD_BATCH_SIZE = 3
+
+        /** Flashcards requested per concept. */
+        private const val FLASHCARDS_PER_CONCEPT = 3
 
         private const val COMPLETION_NOTIFICATION_ID = NotificationHelper.NOTIFICATION_ID + 1
     }

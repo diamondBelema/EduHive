@@ -67,5 +67,22 @@ data class GenerationConfig(
             retryAttempts = 2,
             validateBeforeStore = false
         )
+
+        /**
+         * Fast-track flashcard generation for small/simple files (< 5 pages).
+         *
+         * Single attempt, no validation refinement pass — small models produce
+         * acceptable output on the first attempt for short documents, and the
+         * refinement pass rarely improves quality enough to justify the extra
+         * generation cost (~2–3 seconds per concept).
+         */
+        val FAST_TRACK_FLASHCARD = GenerationConfig(
+            maxTokens = 1280,
+            temperature = 0.4f,
+            topK = 20,
+            randomSeed = 42,
+            retryAttempts = 1,
+            validateBeforeStore = false
+        )
     }
 }
