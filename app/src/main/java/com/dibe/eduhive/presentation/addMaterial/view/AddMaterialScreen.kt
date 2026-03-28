@@ -6,6 +6,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -18,14 +20,21 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key.Companion.Back
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -46,12 +55,12 @@ fun AddMaterialScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    
+
     val workManager = remember { WorkManager.getInstance(context) }
     val activeWorkInfo by workManager.getWorkInfosByTagFlow("material_processing")
         .collectAsStateWithLifecycle(initialValue = emptyList())
-    
-    val currentWork = activeWorkInfo.firstOrNull { 
+
+    val currentWork = activeWorkInfo.firstOrNull {
         it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
     }
 
@@ -68,7 +77,7 @@ fun AddMaterialScreen(
 
     LaunchedEffect(state.successMessage) {
         state.successMessage?.let {
-            delay(2500)
+            delay(3500) // Longer delay to allow reading the expressive summary
             onNavigateBack()
         }
     }
@@ -76,12 +85,12 @@ fun AddMaterialScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { 
+                title = {
                     Text(
-                        "Import Knowledge", 
+                        "Import Knowledge",
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge
-                    ) 
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -112,8 +121,8 @@ fun AddMaterialScreen(
             AnimatedContent(
                 targetState = currentWork != null,
                 transitionSpec = {
-                    fadeIn(tween(500)) + scaleIn(initialScale = 0.92f) togetherWith
-                    fadeOut(tween(400)) + scaleOut(targetScale = 0.95f)
+                    fadeIn(tween(600)) + scaleIn(initialScale = 0.9f) togetherWith
+                            fadeOut(tween(500)) + scaleOut(targetScale = 0.95f)
                 },
                 label = "processing_transition"
             ) { isProcessing ->
@@ -124,7 +133,7 @@ fun AddMaterialScreen(
                     val currentConcept = currentWork.progress.getInt(MaterialProcessingWorker.KEY_CURRENT_CONCEPT, 0)
                     val totalConcepts = currentWork.progress.getInt(MaterialProcessingWorker.KEY_TOTAL_CONCEPTS, 0)
                     val summary = currentWork.progress.getString(MaterialProcessingWorker.KEY_SUMMARY)
-                    
+
                     ProcessingStateExpressive(
                         status = status,
                         progress = progress,
@@ -134,27 +143,6 @@ fun AddMaterialScreen(
                         totalConcepts = totalConcepts
                     )
                 } else {
-                    ImportSelectionExpressive(
-                        onDocumentClick = {
-                            val documentPicker = ActivityResultContracts.OpenDocument()
-                            // Note: Launcher must be registered in the Composable or ViewModel
-                            // This part is simplified for brevity, assuming listeners are set up
-                        },
-                        onImageClick = {
-                            // Simplified for brevity
-                        },
-                        // Passes through to actual picker implementation
-                        triggerDocument = {
-                            val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
-                                addCategory(android.content.Intent.CATEGORY_OPENABLE)
-                                type = "*/*"
-                                putExtra(android.content.Intent.EXTRA_MIME_TYPES, arrayOf("application/pdf", "text/plain", "image/*"))
-                            }
-                            // In real app, use the documentPicker launcher defined above
-                        }
-                    )
-
-                    // Actual UI implementation for pickers
                     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                         uri?.let { selectedUri = it; showTitleSheet = true }
                     }
@@ -162,7 +150,6 @@ fun AddMaterialScreen(
                         uri?.let { selectedUri = it; showTitleSheet = true }
                     }
 
-                    // Re-rendering selection UI with working triggers
                     ImportSelectionExpressive(
                         onDocumentClick = { docPicker.launch(arrayOf("application/pdf", "text/plain", "image/*")) },
                         onImageClick = { imgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
@@ -184,7 +171,7 @@ fun AddMaterialScreen(
         if (showCancelDialog) {
             AlertDialog(
                 onDismissRequest = { showCancelDialog = false },
-                title = { Text("Cancel AI Processing?") },
+                title = { Text("Cancel AI Analysis?") },
                 text = { Text("The AI is currently building your study materials. Stopping now will lose current progress.") },
                 confirmButton = {
                     TextButton(
@@ -206,8 +193,7 @@ fun AddMaterialScreen(
 @Composable
 fun ImportSelectionExpressive(
     onDocumentClick: () -> Unit,
-    onImageClick: () -> Unit,
-    triggerDocument: (() -> Unit)? = null
+    onImageClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -222,7 +208,7 @@ fun ImportSelectionExpressive(
             lineHeight = 36.sp,
             color = MaterialTheme.colorScheme.onSurface
         )
-        
+
         ImportCardExpressive(
             title = "Document or PDF",
             subtitle = "Books, research papers, notes",
@@ -240,7 +226,7 @@ fun ImportSelectionExpressive(
         )
 
         Spacer(modifier = Modifier.weight(1f))
-        
+
         Surface(
             color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
             shape = MaterialTheme.shapes.extraLarge,
@@ -257,8 +243,8 @@ fun ImportSelectionExpressive(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Rounded.AutoAwesome, 
-                            contentDescription = null, 
+                            Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -286,7 +272,7 @@ fun ImportCardExpressive(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f, 
+        targetValue = if (isPressed) 0.96f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
         label = "scale"
     )
@@ -317,14 +303,14 @@ fun ImportCardExpressive(
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(
-                    title, 
-                    style = MaterialTheme.typography.titleLarge, 
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    subtitle, 
-                    style = MaterialTheme.typography.bodyMedium, 
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = LocalContentColor.current.copy(alpha = 0.7f)
                 )
             }
@@ -348,6 +334,33 @@ fun ProcessingStateExpressive(
         label = "progress"
     )
 
+    val infiniteTransition = rememberInfiniteTransition(label = "ai_expressive")
+
+    // Pulse scale for the main content
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.03f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    // Animated glow colors
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
+    val glowColor by infiniteTransition.animateColor(
+        initialValue = primaryColor.copy(alpha = 0.15f),
+        targetValue = tertiaryColor.copy(alpha = 0.15f),
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow_color"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -356,130 +369,169 @@ fun ProcessingStateExpressive(
         verticalArrangement = Arrangement.Center
     ) {
         Box(contentAlignment = Alignment.Center) {
-            // Squiggly/Wavy Circular Progress Indicator from M3
-            // Note: If WavyCircularProgressIndicator is not available in current lib version,
-            // we use an expressive layered approach.
-
-            CircularProgressIndicator(
-                progress = { 1f },
-                modifier = Modifier.size(240.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                strokeWidth = 12.dp,
-                strokeCap = StrokeCap.Round
+            // Soft background glow
+            Box(
+                modifier = Modifier
+                    .size(320.dp)
+                    .blur(40.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(glowColor, Color.Transparent),
+                        ),
+                        CircleShape
+                    )
             )
-            
-            // The "Expressive" part: using multiple overlapping indicators with different stroke caps
+
+            val density = LocalDensity.current
+            val strokeWidthPx = with(density) { 16.dp.toPx() }
+
+            // The Expressive Squiggly Indicator
             CircularWavyProgressIndicator(
                 progress = { animatedProgress },
-                modifier = Modifier.size(240.dp),
-                color = MaterialTheme.colorScheme.primary
-            )
-            
-            // A subtle pulse for the AI activity
-            val infiniteTransition = rememberInfiniteTransition(label = "ai_pulse")
-            val pulseScale by infiniteTransition.animateFloat(
-                initialValue = 1f,
-                targetValue = 1.05f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1500, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
+                modifier = Modifier.size(260.dp),
+                stroke = Stroke(
+                    width = strokeWidthPx,
+                    cap = StrokeCap.Round,
+                    miter = 20f
                 ),
-                label = "pulse"
+                trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.primary,
+                gapSize = 0.dp,
+                wavelength = 48.dp
             )
 
+            // Central Content
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.scale(pulseScale)
             ) {
+                // This creates the standard "Back" overshoot effect
+                val BackEasing = CubicBezierEasing(0.175f, 0.885f, 0.32f, 1.275f)
+
                 AnimatedContent(
                     targetState = successMessage != null,
                     transitionSpec = {
-                        scaleIn() + fadeIn() togetherWith scaleOut() + fadeOut()
+                        (scaleIn(tween(500, easing = BackEasing)) + fadeIn()) togetherWith
+                                (scaleOut(tween(400)) + fadeOut())
                     },
                     label = "status_icon"
                 ) { isDone ->
                     if (isDone) {
-                        Icon(
-                            Icons.Rounded.CheckCircle, 
-                            contentDescription = null, 
-                            modifier = Modifier.size(80.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        Surface(
+                            modifier = Modifier.size(100.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            tonalElevation = 4.dp
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(64.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     } else {
-                        Text(
-                            text = "${(animatedProgress * 100).toInt()}%",
-                            style = MaterialTheme.typography.displayMedium,
-                            fontWeight = FontWeight.Black
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "${(animatedProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.displayMedium,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Analysis in progress",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(56.dp))
 
-        // Expressive Status Pill
+        // Glassmorphic Status Pill
         Surface(
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            shape = CircleShape
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.9f),
+            shape = CircleShape,
+            tonalElevation = 8.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (successMessage == null) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.5.dp,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(14.dp))
                 }
-                
+
                 Text(
-                    text = if (successMessage != null) "Complete!" else status,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.ExtraBold,
+                    text = if (successMessage != null) "Knowledge Hive Updated" else status,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
             }
         }
 
-        // Feedback Summary
+        // Summary Badges Section
         AnimatedVisibility(
             visible = totalConcepts > 0 || flashcardsValid > 0,
-            enter = slideInVertically { it / 2 } + fadeIn()
+            enter = slideInVertically { it / 2 } + fadeIn(tween(800)),
+            modifier = Modifier.padding(top = 32.dp)
         ) {
             Column(
-                modifier = Modifier.padding(top = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     if (totalConcepts > 0) {
-                        SummaryBadge(
+                        SummaryBadgeExpressive(
                             label = "Concepts",
                             value = if (currentConcept > 0 && successMessage == null) "$currentConcept/$totalConcepts" else "$totalConcepts",
-                            icon = Icons.Rounded.AutoAwesome
+                            icon = Icons.Rounded.AutoAwesome,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                     if (flashcardsValid > 0) {
-                        SummaryBadge(
-                            label = "Cards",
+                        SummaryBadgeExpressive(
+                            label = "Flashcards",
                             value = "$flashcardsValid",
-                            icon = Icons.Rounded.Style
+                            icon = Icons.Rounded.Style,
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
-                
+
                 successMessage?.let {
-                    Text(
-                        text = it,
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        shape = MaterialTheme.shapes.extraLarge,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = it,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 22.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -487,21 +539,50 @@ fun ProcessingStateExpressive(
 }
 
 @Composable
-fun SummaryBadge(label: String, value: String, icon: ImageVector) {
+fun SummaryBadgeExpressive(
+    label: String,
+    value: String,
+    icon: ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-        shape = MaterialTheme.shapes.medium
+        color = color,
+        shape = MaterialTheme.shapes.extraLarge,
+        tonalElevation = 2.dp,
+        modifier = modifier
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.Start
         ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-            Column {
-                Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
-                Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp)
+            Surface(
+                color = contentColorFor(color).copy(alpha = 0.1f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = contentColorFor(color)
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                color = contentColorFor(color)
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = contentColorFor(color).copy(alpha = 0.7f)
+            )
         }
     }
 }
@@ -528,19 +609,19 @@ fun TitleEntryBottomSheet(
                 .padding(bottom = 48.dp, top = 8.dp)
         ) {
             Text(
-                "Name this Material", 
-                style = MaterialTheme.typography.headlineSmall, 
+                "Name this Material",
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Give your knowledge source a clear name for your hive.", 
-                style = MaterialTheme.typography.bodyMedium, 
+                "Give your knowledge source a clear name for your hive.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             Spacer(Modifier.height(24.dp))
-            
+
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
@@ -553,9 +634,9 @@ fun TitleEntryBottomSheet(
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
             )
-            
+
             Spacer(Modifier.height(32.dp))
-            
+
             Button(
                 onClick = { if (title.isNotBlank()) onConfirm(title) },
                 enabled = title.isNotBlank(),
@@ -567,4 +648,32 @@ fun TitleEntryBottomSheet(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Preview
+@Composable
+fun TestCircularProgress() {
+    val density = LocalDensity.current
+    val strokeWidthPx = with(density) { 16.dp.toPx() }
+
+    val animatedProgress by animateFloatAsState(
+        targetValue = .5f,
+        animationSpec = spring(stiffness = Spring.StiffnessVeryLow),
+        label = "progress"
+    )
+
+    CircularWavyProgressIndicator(
+        progress = { animatedProgress },
+        modifier = Modifier.size(260.dp),
+        stroke = Stroke(
+            width = strokeWidthPx,
+            cap = StrokeCap.Round,
+            miter = 20f
+        ),
+        trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.primary,
+        gapSize = 0.dp,
+        wavelength = 48.dp
+    )
 }

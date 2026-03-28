@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.dibe.eduhive.data.repository.ConceptExtractionProgress
@@ -83,6 +82,8 @@ class MaterialProcessingWorker @AssistedInject constructor(
             postNotification("Analyzing \"$title\"", "Identifying concepts...", 15)
 
             var extractedConceptsList: List<com.dibe.eduhive.domain.model.Concept>? = null
+            var extractionError: String? = null
+
             conceptRepository.extractConceptsFromPagesStreaming(
                 pages = extractedPages,
                 hiveId = hiveId,
@@ -90,18 +91,37 @@ class MaterialProcessingWorker @AssistedInject constructor(
             ).collect { progress ->
                 if (isStopped) return@collect
 
-                if (progress is ConceptExtractionProgress.Processing) {
-                    val p = 15 + (progress.percent * 0.35).toInt()
-                    setProgress(workDataOf(KEY_HIVE_ID to hiveId, KEY_TITLE to title, KEY_PROGRESS to p, KEY_STATUS to "Analyzing... ${progress.percent}%"))
-                    postNotification("Analyzing \"$title\"", "Concept extraction: ${progress.percent}%", p)
-                } else if (progress is ConceptExtractionProgress.Success) {
-                    extractedConceptsList = progress.concepts
+                when (progress) {
+                    is ConceptExtractionProgress.Processing -> {
+                        val p = 15 + (progress.percent * 0.35).toInt()
+                        setProgress(workDataOf(KEY_HIVE_ID to hiveId, KEY_TITLE to title, KEY_PROGRESS to p, KEY_STATUS to "Analyzing... ${progress.percent}%"))
+                        postNotification("Analyzing \"$title\"", "Concept extraction: ${progress.percent}%", p)
+                    }
+                    is ConceptExtractionProgress.Success -> {
+                        extractedConceptsList = progress.concepts
+                    }
+                    is ConceptExtractionProgress.Error -> {
+                        // Capture the error — don't crash, handle it after collect
+                        extractionError = progress.message
+                    }
+                    else -> { /* Loading state — ignore */ }
                 }
             }
 
             if (isStopped) return Result.failure()
 
-            val finalConcepts = extractedConceptsList ?: return Result.failure(workDataOf(KEY_ERROR to "No concepts extracted", KEY_HIVE_ID to hiveId))
+            // If extraction errored AND produced no concepts — retry the job
+            // WorkManager will re-enqueue it with backoff. If it errored but
+            // some concepts still came through (partial success), keep going.
+            if (extractedConceptsList.isNullOrEmpty()) {
+                cancelNotification()
+                android.util.Log.w("MaterialWorker", "Concept extraction failed: $extractionError")
+                // Retry instead of hard-failing — transient model errors are common
+                return if (runAttemptCount < MAX_RETRIES) Result.retry()
+                else Result.failure(workDataOf(KEY_ERROR to (extractionError ?: "No concepts extracted"), KEY_HIVE_ID to hiveId))
+            }
+
+            val finalConcepts = extractedConceptsList!!
 
             // 4. Generate flashcards
             var totalValid = 0
@@ -139,11 +159,9 @@ class MaterialProcessingWorker @AssistedInject constructor(
                     }
                     if (cardsAdded == 0) failedConcepts.add(concept.name)
                 } catch (e: Exception) {
-                    // Problem 1 Fix: skip failing concepts instead of restarting
                     android.util.Log.e("MaterialWorker", "Failed cards for ${concept.name}", e)
                     failedConcepts.add(concept.name)
                 }
-
             }
 
             if (isStopped) return Result.failure(workDataOf(KEY_STATUS to "Cancelled", KEY_HIVE_ID to hiveId))
@@ -167,8 +185,9 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 KEY_SUMMARY to summary
             ))
 
-            val completionNotification = NotificationHelper.getBaseNotification(context, "Processing Complete", "Added $totalValid cards to \"$title\"")
-                .setOngoing(false).setAutoCancel(true).build()
+            val completionNotification = NotificationHelper.getBaseNotification(
+                context, "Processing Complete", "Added $totalValid cards to \"$title\""
+            ).setOngoing(false).setAutoCancel(true).build()
             notificationManager.notify(COMPLETION_NOTIFICATION_ID, completionNotification)
             cancelNotification()
 
@@ -230,6 +249,7 @@ class MaterialProcessingWorker @AssistedInject constructor(
         const val KEY_TOTAL_CONCEPTS = "totalConcepts"
 
         private const val SMALL_FILE_PAGE_THRESHOLD = 5
+        private const val MAX_RETRIES = 2
         private const val COMPLETION_NOTIFICATION_ID = NotificationHelper.NOTIFICATION_ID + 1
     }
 }
