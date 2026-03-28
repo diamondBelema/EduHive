@@ -110,15 +110,17 @@ class MaterialProcessingWorker @AssistedInject constructor(
 
             if (isStopped) return Result.failure()
 
-            // If extraction errored AND produced no concepts — retry the job
-            // WorkManager will re-enqueue it with backoff. If it errored but
-            // some concepts still came through (partial success), keep going.
+            // Never retry — restarting from scratch is worse than a clean failure.
+            // AiDataSource already handles partial success (some batches fail, some pass)
+            // by emitting Success with whatever concepts it collected. So if we get here
+            // with an empty list, the model truly produced nothing — fail cleanly.
             if (extractedConceptsList.isNullOrEmpty()) {
                 cancelNotification()
-                android.util.Log.w("MaterialWorker", "Concept extraction failed: $extractionError")
-                // Retry instead of hard-failing — transient model errors are common
-                return if (runAttemptCount < MAX_RETRIES) Result.retry()
-                else Result.failure(workDataOf(KEY_ERROR to (extractionError ?: "No concepts extracted"), KEY_HIVE_ID to hiveId))
+                android.util.Log.w("MaterialWorker", "Concept extraction produced nothing: $extractionError")
+                return Result.failure(workDataOf(
+                    KEY_ERROR to (extractionError ?: "No concepts could be extracted from this document"),
+                    KEY_HIVE_ID to hiveId
+                ))
             }
 
             val finalConcepts = extractedConceptsList!!
@@ -249,7 +251,6 @@ class MaterialProcessingWorker @AssistedInject constructor(
         const val KEY_TOTAL_CONCEPTS = "totalConcepts"
 
         private const val SMALL_FILE_PAGE_THRESHOLD = 5
-        private const val MAX_RETRIES = 2
         private const val COMPLETION_NOTIFICATION_ID = NotificationHelper.NOTIFICATION_ID + 1
     }
 }

@@ -30,12 +30,15 @@ data class GenerationConfig(
          * Window 1280: ~400 tok input, ~800 tok output headroom.
          * Temperature low (0.2) — format compliance matters more than creativity.
          */
+        // maxTokens = 800: concept extraction needs short outputs (5 concepts x ~15 tokens each = ~75 tokens out).
+        // Lower ceiling = faster generation + prevents "Reached max sequence length" crashes
+        // on dense academic text where the model tries to over-generate.
         val CONCEPT_EXTRACTION = GenerationConfig(
-            maxTokens = 1280,
+            maxTokens = 800,
             temperature = 0.2f,
             topK = 20,
             randomSeed = 42,
-            retryAttempts = 2,
+            retryAttempts = 1,
             validateBeforeStore = false
         )
 

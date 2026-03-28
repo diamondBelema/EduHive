@@ -9,7 +9,7 @@ import com.dibe.eduhive.domain.repository.FlashcardRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.util.UUID
-import jakarta.inject.Inject
+import javax.inject.Inject
 
 
 class FlashcardRepositoryImpl @Inject constructor(
@@ -199,13 +199,10 @@ class FlashcardRepositoryImpl @Inject constructor(
  */
 sealed class FlashcardGenerationProgress {
     object Loading : FlashcardGenerationProgress()
-    /** Emitted before each retry attempt (attempt index > 0). */
     data class Retrying(val attempt: Int) : FlashcardGenerationProgress()
-    /** Emitted when validation is running after draft generation. */
     object Validating : FlashcardGenerationProgress()
     data class Success(
         val flashcards: List<Flashcard>,
-        /** Count of candidate cards rejected by the quality validator. */
         val rejectedCount: Int = 0
     ) : FlashcardGenerationProgress()
     data class Error(val message: String) : FlashcardGenerationProgress()

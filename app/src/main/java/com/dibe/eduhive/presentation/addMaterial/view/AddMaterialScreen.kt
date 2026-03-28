@@ -99,13 +99,21 @@ fun AddMaterialScreen(
                 },
                 actions = {
                     if (currentWork != null) {
-                        TextButton(
+                        FilledTonalIconButton(
                             onClick = { showCancelDialog = true },
-                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .size(40.dp),
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
                         ) {
-                            Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Stop")
+                            Icon(
+                                Icons.Rounded.Stop,
+                                contentDescription = "Cancel processing",
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

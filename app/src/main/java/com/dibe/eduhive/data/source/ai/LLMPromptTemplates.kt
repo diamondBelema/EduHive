@@ -19,18 +19,40 @@ object LLMPromptTemplates {
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-Extract 5-10 specific, testable concepts from the text.
-Prefer mechanisms, processes, relationships, definitions. Avoid broad topics.
+Extract 5-10 specific study concepts from the text.
+Do not output blank lines. Do not output markdown.
+Each concept must be unique and testable.
+Each description must be 8-16 words.
+
+OUTPUT RULES:
+1) Start with OUTPUT_START on its own line.
+2) Then only repeated pairs:
+CONCEPT: <name>
+DESCRIPTION: <description>
+3) End with OUTPUT_END on its own line.
+4) If nothing is found, return exactly:
+OUTPUT_START
+NO_CONCEPTS
+OUTPUT_END
+
 ${contextLine}Text:
 $text
 
+OUTPUT_START
 CONCEPT: Muscle hypertrophy
-DESCRIPTION: Increase in muscle size due to resistance training.
+DESCRIPTION: Increase in muscle fiber size due to progressive resistance loading.
 
 CONCEPT: Osmosis
-DESCRIPTION: Movement of water across a semi-permeable membrane.
+DESCRIPTION: Passive movement of water across a selectively permeable membrane gradient.
 
-CONCEPT:""".trimIndent()
+OUTPUT_END
+
+Now produce only the output block:
+OUTPUT_START
+CONCEPT:
+DESCRIPTION:
+OUTPUT_END
+""".trimIndent()
     }
 
     // ── Flashcard generation ──────────────────────────────────────────────────
@@ -41,8 +63,13 @@ Create $count flashcards for: $conceptName
 Context: $conceptDescription
 
 Rules:
-- FRONT: a specific question (scenario, comparison, or consequence — not a single word)
-- BACK: a full sentence explaining the logic, not just a definition
+- Use only this format:
+FRONT: <question>
+BACK: <answer>
+- FRONT must be a complete question mentioning "$conceptName" or a clear scenario.
+- Avoid one-word or generic fronts (Definition, Application, Mechanism, etc.).
+- BACK must be a concise standalone answer (1-2 sentences).
+- Do not repeat stems like "What is" across all cards.
 
 FRONT: How does $conceptName break down under extreme conditions?
 BACK: [concise explanation of the failure mode or edge case]
@@ -50,10 +77,6 @@ BACK: [concise explanation of the failure mode or edge case]
 FRONT:""".trimIndent()
     }
 
-    /**
-     * Batched flashcard generation for multiple concepts.
-     * Keep concepts.size <= 3 per call (enforced by BATCH_SIZE in AiDataSource).
-     */
     fun flashcardBatch(concepts: List<Pair<String, String>>, countPerConcept: Int): String {
         val conceptsBlock = concepts.mapIndexed { i, (name, desc) ->
             "${i + 1}. $name: $desc"
@@ -64,18 +87,16 @@ Generate $countPerConcept flashcards for each concept below.
 
 $conceptsBlock
 
-Rules:
-- FRONT: a complete question (not a single word)
-- BACK: a complete answer sentence
-
 CONCEPT: [Number]
 FRONT: [Question]
-BACK: [Answer]""".trimIndent()
+BACK: [Answer]
+
+Rules:
+- Keep FRONT specific to that concept; never generic.
+- One unique angle per card (mechanism, contrast, application, failure case).
+- No markdown, no bullet lists, no extra labels.""".trimIndent()
     }
 
-    /**
-     * Refinement prompt — only called when pass rate < MIN_PASS_RATE.
-     */
     fun flashcardRefinement(draftFlashcards: List<GeneratedFlashcard>): String {
         val cardsBlock = draftFlashcards.joinToString("\n\n") { card ->
             "FRONT: ${card.front}\nBACK: ${card.back}"
@@ -130,8 +151,6 @@ QUESTION 1
 TYPE:""".trimIndent()
     }
 
-    // ── Prompt mutation for retry attempts ────────────────────────────────────
-
     fun mutate(basePrompt: String, attempt: Int): String {
         val suffix = when (attempt) {
             0 -> ""
@@ -140,8 +159,6 @@ TYPE:""".trimIndent()
         }
         return basePrompt + suffix
     }
-
-    // ── Grounded chat ─────────────────────────────────────────────────────────
 
     fun groundedChat(question: String, contextChunks: List<GroundedContextChunk>): String {
         val chunkBlock = contextChunks.joinToString("\n\n") { chunk ->

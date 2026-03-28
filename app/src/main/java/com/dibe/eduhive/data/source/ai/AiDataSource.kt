@@ -36,12 +36,14 @@ class AIDataSource @Inject constructor(
         const val BATCH_SIZE = 3
 
         // ── Per-task input character limits ───────────────────────────────
-        // MAX_INPUT_CHARS_CONCEPTS raised to 2400: since we now merge multiple pages
-        // into one batch before sending, we need the higher ceiling to fit 2-3 pages.
-        // 2400 chars ≈ 600 tokens, leaving ~680 tokens for the prompt template and
-        // ~1280 - 680 - 600 = 0 overshoot risk — well within the 1280 window because
-        // the prompt template itself shrank significantly (no TEACHER_PERSONA, no rule blocks).
-        private const val MAX_INPUT_CHARS_CONCEPTS   = 2400
+        // MAX_INPUT_CHARS_CONCEPTS = 1200:
+        // Token budget: 1280 total window
+        //   prompt template overhead: ~80 tokens (~320 chars)
+        //   input text ceiling:       ~300 tokens (~1200 chars)
+        //   output headroom:          ~900 tokens — plenty for 5-10 concept pairs
+        // Previously raised to 2400 which caused "Reached max sequence length" crashes
+        // because dense text + prompt overhead exceeded the 1280-token window.
+        private const val MAX_INPUT_CHARS_CONCEPTS   = 1200
         private const val MAX_INPUT_CHARS_FLASHCARDS = 800
         private const val MAX_INPUT_CHARS_QUIZ       = 800
 
@@ -142,10 +144,13 @@ class AIDataSource @Inject constructor(
         batches.forEachIndexed { index, batch ->
             send(ConceptExtractionState.Progress(((index.toFloat() / totalBatches) * 100).toInt()))
 
+
+
             val prompt = LLMPromptTemplates.conceptExtraction(batch, hiveContext)
             val result = modelManager.generate(prompt)
 
             result.onSuccess { response ->
+                Log.d(TAG, "RAW RESPONSE BATCH $index:\n$response")  // must be here
                 val batchConcepts = parseConceptsRobust(response)
                 Log.d(TAG, "Batch $index: parsed ${batchConcepts.size} concepts")
                 allExtractedConcepts.addAll(batchConcepts)
@@ -431,7 +436,10 @@ class AIDataSource @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
 
     private suspend fun ensureModelLoaded(config: GenerationConfig = GenerationConfig()): Boolean {
-        if (modelManager.isModelLoaded()) return true
+        // Always call loadModel — it checks internally whether a reload is actually needed
+        // (same modelId + same maxTokens = no reload, just updates session config).
+        // The old guard "if isModelLoaded return true" bypassed the config entirely,
+        // meaning maxTokens was never updated between tasks (concept=800, flashcard=1280).
         val modelId = modelPreferences.getActiveModel() ?: return false
         return modelManager.loadModel(modelId, config).isSuccess
     }
@@ -441,6 +449,12 @@ class AIDataSource @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun stripPromptEcho(response: String): String {
+        val blockStart = response.indexOf("OUTPUT_START")
+        val blockEnd = response.indexOf("OUTPUT_END")
+        if (blockStart != -1 && blockEnd > blockStart) {
+            return response.substring(blockStart + "OUTPUT_START".length, blockEnd).trim()
+        }
+
         val echoMarkers = listOf(
             "DESCRIPTION: A short definition of a key idea found in the provided text.",
             "DESCRIPTION: Another distinct idea from the provided text, not a repeat.",
@@ -503,20 +517,32 @@ class AIDataSource @Inject constructor(
 
     private fun parseConceptsRobust(response: String): List<ExtractedConcept> {
         val cleaned = stripPromptEcho(response)
+        if (cleaned.contains("NO_CONCEPTS", ignoreCase = true)) return emptyList()
+
         val concepts = mutableListOf<ExtractedConcept>()
         var currentName: String? = null
 
-        for (line in cleaned.lines()) {
+        val lines = cleaned.lines()
+        lines.forEachIndexed { idx, line ->
             val cleanLine = line.replace("*", "").trim()
 
             when {
                 cleanLine.startsWith("CONCEPT:", ignoreCase = true) -> {
+                    // If we had a previous concept with no description, flush it now
+                    // before overwriting currentName
+                    if (currentName != null) {
+                        if (currentName!!.isNotBlank() &&
+                            currentName!!.lowercase() !in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
+                            // Use name as description fallback — better than discarding
+                            concepts.add(ExtractedConcept(currentName!!, currentName!!))
+                        }
+                    }
                     currentName = cleanLine
                         .substringAfter(":")
                         .trim()
                         .removePrefix("[").removeSuffix("]")
                         .trim()
-                    if (currentName.lowercase() in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
+                    if (currentName!!.lowercase() in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
                         currentName = null
                     }
                 }
@@ -527,13 +553,22 @@ class AIDataSource @Inject constructor(
                         .trim()
                         .removePrefix("[").removeSuffix("]")
                         .trim()
-                    if (currentName!!.isNotBlank() && description.length > 10) {
-                        concepts.add(ExtractedConcept(currentName!!, description))
+                    val descToUse = if (description.length > 10) description else currentName!!
+                    if (currentName!!.isNotBlank()) {
+                        concepts.add(ExtractedConcept(currentName!!, descToUse))
                     }
                     currentName = null
                 }
             }
         }
+
+        // Flush any trailing concept that had no description
+        if (currentName != null &&
+            currentName!!.isNotBlank() &&
+            currentName!!.lowercase() !in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
+            concepts.add(ExtractedConcept(currentName!!, currentName!!))
+        }
+
         return concepts
     }
 
