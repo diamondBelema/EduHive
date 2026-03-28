@@ -474,8 +474,6 @@ private fun GeneratingOverlay(
             progress = progress,
             successMessage = null,
             flashcardsValid = 0,
-            flashcardsRejected = 0,
-            duplicatesFound = 0
         )
     }
 }

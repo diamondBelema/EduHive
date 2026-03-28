@@ -12,16 +12,6 @@ import javax.inject.Singleton
 
 /**
  * AI Data Source — builds prompts, calls the model, parses responses.
- *
- * Key fixes applied here (see companion object comments for rationale):
- *  1. ensureModelLoaded() now accepts and forwards a GenerationConfig so the
- *     right maxTokens / temperature is set for each task type.
- *  2. Per-task input character limits replace the single MAX_INPUT_CHARS constant.
- *  3. parseConceptsRobust() strips prompt echo before parsing.
- *  4. Page-level failures are counted and surfaced — no more silent swallowing.
- *  5. Concept extraction requests 3 concepts per page (not 5) to match the
- *     tighter token budget and improve per-concept quality.
- *  6. Flashcard count per call capped at 3 for the same budget reason.
  */
 @Singleton
 class AIDataSource @Inject constructor(
@@ -35,42 +25,17 @@ class AIDataSource @Inject constructor(
 
         /**
          * Minimum flashcard pass rate before triggering a refinement pass.
-         * Lowered to 0.35 — on small models (135M/270M) the refinement pass rarely
-         * produces better output than the first attempt, so we only pay for it when
-         * quality is genuinely terrible. On 1B it still fires when needed.
+         * Lowered to 0.4 — more realistic for small models while maintaining quality.
          */
-        private const val MIN_PASS_RATE = 0.35f
+        private const val MIN_PASS_RATE = 0.4f
 
         /**
          * Maximum concepts per batched flashcard request.
-         * Kept at 3 (down from 5) — small models lose coherence in larger batches.
+         * Kept at 3 — small models lose coherence in larger batches.
          */
         const val BATCH_SIZE = 3
 
         // ── Per-task input character limits ───────────────────────────────
-        // These replace the single MAX_INPUT_CHARS = 3500 constant.
-        //
-        // Rule: prompt_overhead_chars + input_chars + expected_output_chars
-        //       must fit inside maxTokens * 4 (rough chars-per-token estimate).
-        //
-        // Concept extraction:
-        //   maxTokens=2048 → 8192 chars total budget
-        //   Prompt overhead: ~520 chars (~130 tok)
-        //   Input ceiling:   1600 chars (~400 tok)
-        //   Output headroom: ~6072 chars (~1518 tok) ← plenty for 3 concept pairs
-        //
-        // Flashcard generation:
-        //   maxTokens=1536 → 6144 chars total budget
-        //   Prompt overhead: ~400 chars (~100 tok)
-        //   Input ceiling:   800 chars (~200 tok)  ← concept name + description
-        //   Output headroom: ~4944 chars (~1236 tok) ← plenty for 3 FRONT/BACK pairs
-        //
-        // Quiz generation:
-        //   maxTokens=1536 → 6144 chars total budget
-        //   Prompt overhead: ~550 chars (~138 tok)
-        //   Input ceiling:   800 chars (~200 tok)
-        //   Output headroom: ~4794 chars (~1199 tok)
-        //
         private const val MAX_INPUT_CHARS_CONCEPTS   = 1600
         private const val MAX_INPUT_CHARS_FLASHCARDS = 800
         private const val MAX_INPUT_CHARS_QUIZ       = 800
@@ -80,25 +45,53 @@ class AIDataSource @Inject constructor(
 
         /**
          * Max flashcard facts to inject into a quiz prompt.
-         * 3 facts × ~50 chars each = ~150 chars / ~38 tokens — fits comfortably
-         * inside the quiz input budget alongside the prompt template overhead.
          */
         private const val MAX_FACTS_PER_QUIZ = 3
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Grounded document chat (Phase 1)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun answerQuestionFromContext(
+        question: String,
+        contextChunks: List<GroundedContextChunk>
+    ): Result<GroundedAnswer> = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureModelLoaded(GenerationConfig.QUIZ)) {
+                return@withContext Result.failure(IllegalStateException("No model available"))
+            }
+            if (contextChunks.isEmpty()) {
+                return@withContext Result.failure(IllegalArgumentException("No context chunks provided"))
+            }
+
+            val prompt = LLMPromptTemplates.groundedChat(question, contextChunks)
+            val response = modelManager.generate(prompt).getOrThrow()
+            Result.success(parseGroundedAnswer(response))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Retain the model for a multi-step processing pipeline.
+     * Prevents mid-pipeline unloads that would require an expensive reload.
+     * Must be paired with exactly one [releaseModelRef] call.
+     */
+    fun retainModelForPipeline() = modelManager.retainModelRef()
+
+    /**
+     * Release the pipeline model reference acquired via [retainModelForPipeline].
+     * If no other references are held and an unload was requested during the
+     * pipeline, the model will be unloaded now.
+     */
+    suspend fun releaseModelRef() = modelManager.releaseModelRef()
+
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Concept extraction
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Extract concepts from a list of pages with streaming progress.
-     * Preferred entry point for PDFs — processes page-by-page.
-     *
-     * Fix 1: passes CONCEPT_EXTRACTION config to ensureModelLoaded().
-     * Fix 2: uses MAX_INPUT_CHARS_CONCEPTS limit (1600) not 3500.
-     * Fix 3: tracks per-page failures; surfaces an error if ALL pages fail.
-     * Fix 4: calls parseConceptsRobust() which strips echo before parsing.
-     */
     fun extractConceptsFromPagesStreaming(
         pages: List<String>,
         hiveContext: String = ""
@@ -117,7 +110,6 @@ class AIDataSource @Inject constructor(
         pages.forEachIndexed { index, page ->
             send(ConceptExtractionState.Progress(((index.toFloat() / totalPages) * 100).toInt()))
 
-            // Enforce per-task input limit before building the prompt
             val safePage = page.take(MAX_INPUT_CHARS_CONCEPTS)
             val prompt = LLMPromptTemplates.conceptExtraction(safePage, hiveContext)
             val result = modelManager.generate(prompt)
@@ -129,8 +121,6 @@ class AIDataSource @Inject constructor(
             }.onFailure { e ->
                 failedPages++
                 Log.w(TAG, "Page $index failed ($failedPages/$totalPages): ${e.message}")
-                // Only reload if the engine itself crashed — a bad generation output
-                // doesn't mean the engine is broken, and a full reload costs 3–5s.
                 if (!modelManager.isModelLoaded()) {
                     delay(300)
                     ensureModelLoaded(GenerationConfig.CONCEPT_EXTRACTION)
@@ -154,13 +144,6 @@ class AIDataSource @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    /** Streaming extraction for a single block of text. */
-    fun extractConceptsStreaming(
-        text: String,
-        hiveContext: String = ""
-    ): Flow<ConceptExtractionState> = extractConceptsFromPagesStreaming(listOf(text), hiveContext)
-
-    /** Blocking single-text extraction. */
     suspend fun extractConcepts(
         text: String,
         hiveContext: String = ""
@@ -178,7 +161,6 @@ class AIDataSource @Inject constructor(
         }
     }
 
-    /** Blocking multi-page extraction. */
     suspend fun extractConceptsFromDocument(
         pages: List<String>,
         hiveContext: String = ""
@@ -201,6 +183,9 @@ class AIDataSource @Inject constructor(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Flashcard generation
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Flashcard generation
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -236,29 +221,22 @@ class AIDataSource @Inject constructor(
         send(FlashcardGenerationState.Success(result.flashcards, result.rejectedCount))
     }.flowOn(Dispatchers.IO)
 
-    /** Blocking flashcard generation. */
     suspend fun generateFlashcards(
         conceptName: String,
         conceptDescription: String,
-        count: Int = FLASHCARDS_PER_CONCEPT,
-        skipValidation: Boolean = false
+        count: Int = FLASHCARDS_PER_CONCEPT
     ): Result<List<GeneratedFlashcard>> = withContext(Dispatchers.IO) {
         try {
-            val config = if (skipValidation) GenerationConfig.FAST_TRACK_FLASHCARD else GenerationConfig.FLASHCARD
-            if (!ensureModelLoaded(config)) {
+            if (!ensureModelLoaded(GenerationConfig.FLASHCARD)) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-            val result = generateWithValidation(conceptName, conceptDescription, count, skipValidation)
+            val result = generateWithValidation(conceptName, conceptDescription, count)
             Result.success(result.flashcards)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    /**
-     * Batched flashcard generation across multiple concepts.
-     * Caller should pass batches of <= BATCH_SIZE (3) concepts.
-     */
     suspend fun generateFlashcardsBatch(
         concepts: List<Pair<String, String>>,
         countPerConcept: Int = FLASHCARDS_PER_CONCEPT
@@ -281,7 +259,6 @@ class AIDataSource @Inject constructor(
     // Quiz generation
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** Generate quiz questions with streaming progress. */
     fun generateQuizStreaming(
         conceptName: String,
         conceptDescription: String,
@@ -296,7 +273,6 @@ class AIDataSource @Inject constructor(
         }
 
         val safeDesc = conceptDescription.take(MAX_INPUT_CHARS_QUIZ)
-        // Cap facts to token budget: each "Q: ... | A: ..." entry is ~30–50 chars
         val safeFacts = facts.take(MAX_FACTS_PER_QUIZ)
         val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, safeFacts, questionCount)
 
@@ -315,7 +291,6 @@ class AIDataSource @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    /** Blocking quiz generation. */
     suspend fun generateQuiz(
         conceptName: String,
         conceptDescription: String,
@@ -331,30 +306,6 @@ class AIDataSource @Inject constructor(
             val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, safeFacts, questionCount)
             val response = modelManager.generate(prompt).getOrThrow()
             Result.success(parseQuizFromResponse(response))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Grounded document chat (Phase 1)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    suspend fun answerQuestionFromContext(
-        question: String,
-        contextChunks: List<GroundedContextChunk>
-    ): Result<GroundedAnswer> = withContext(Dispatchers.IO) {
-        try {
-            if (!ensureModelLoaded(GenerationConfig.QUIZ)) {
-                return@withContext Result.failure(IllegalStateException("No model available"))
-            }
-            if (contextChunks.isEmpty()) {
-                return@withContext Result.failure(IllegalArgumentException("No context chunks provided"))
-            }
-
-            val prompt = LLMPromptTemplates.groundedChat(question, contextChunks)
-            val response = modelManager.generate(prompt).getOrThrow()
-            Result.success(parseGroundedAnswer(response))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -448,62 +399,17 @@ class AIDataSource @Inject constructor(
     // Model lifecycle
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Ensure the model is loaded with the correct config for this task type.
-     *
-     * Fix: previously called loadModel(modelId) with no config, meaning the
-     * model ALWAYS loaded with GenerationConfig() defaults regardless of task.
-     * Now each task passes its specific config so maxTokens and temperature
-     * are correct for the work about to be done.
-     *
-     * Note: if the model is already loaded from a prior call with a different
-     * config, we do NOT reload — reloading is expensive (~2–5 seconds). This
-     * means the config used for the FIRST load in a session persists. A future
-     * improvement is to track the active config and reload only when it differs.
-     */
     private suspend fun ensureModelLoaded(config: GenerationConfig = GenerationConfig()): Boolean {
         if (modelManager.isModelLoaded()) return true
         val modelId = modelPreferences.getActiveModel() ?: return false
         return modelManager.loadModel(modelId, config).isSuccess
     }
 
-    /**
-     * Retain the model for a multi-step processing pipeline.
-     * Prevents mid-pipeline unloads that would require an expensive reload.
-     * Must be paired with exactly one [releaseModelRef] call.
-     */
-    fun retainModelForPipeline() = modelManager.retainModelRef()
-
-    /**
-     * Release the pipeline model reference acquired via [retainModelForPipeline].
-     * If no other references are held and an unload was requested during the
-     * pipeline, the model will be unloaded now.
-     */
-    suspend fun releaseModelRef() = modelManager.releaseModelRef()
-
     // ─────────────────────────────────────────────────────────────────────────
     // Parsers
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Strip prompt echo from the model response before parsing.
-     *
-     * Small models (especially 135M–270M) often begin their response by
-     * repeating part of the prompt — including the two example concepts we
-     * provide. This strips everything up to and including the last instruction
-     * boundary so only the model's own generated output is parsed.
-     *
-     * Strategy:
-     *  1. Find the position of the last instruction line in the response.
-     *     Instruction lines are the lines we wrote — they end with the second
-     *     example DESCRIPTION line.
-     *  2. Everything after that position is the model's output.
-     *  3. If no instruction boundary is found, skip known example concepts
-     *     by name using KNOWN_EXAMPLE_CONCEPT_NAMES.
-     */
     private fun stripPromptEcho(response: String): String {
-        // The last line of our prompt examples is always a DESCRIPTION: line
-        // for "Mitosis". Find the last occurrence of it.
         val echoMarkers = listOf(
             "DESCRIPTION: A short definition of a key idea found in the provided text.",
             "DESCRIPTION: Another distinct idea from the provided text, not a repeat.",
@@ -513,7 +419,6 @@ class AIDataSource @Inject constructor(
         for (marker in echoMarkers) {
             val idx = response.lastIndexOf(marker)
             if (idx != -1) {
-                // Skip past this line to find where the model's real output begins
                 val afterMarker = response.substring(idx)
                 val nextConcept = afterMarker.indexOf("\nCONCEPT:")
                 if (nextConcept != -1) {
@@ -524,16 +429,47 @@ class AIDataSource @Inject constructor(
         return response
     }
 
-    /**
-     * Parse CONCEPT: / DESCRIPTION: pairs from a model response.
-     *
-     * Robustness features:
-     *  - Strips prompt echo before parsing (see stripPromptEcho).
-     *  - Strips asterisks (model markdown artifacts).
-     *  - Removes [ ] bracket wrapping (placeholder leftovers).
-     *  - Skips known example concept names from the prompt template.
-     *  - Requires both name and description to be non-blank before adding.
-     */
+    private fun parseGroundedAnswer(response: String): GroundedAnswer {
+        val answerLine = response
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("ANSWER:", ignoreCase = true) }
+            ?.substringAfter(":")
+            ?.trim()
+
+        val confidence = response
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("CONFIDENCE:", ignoreCase = true) }
+            ?.substringAfter(":")
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it in setOf("HIGH", "MEDIUM", "LOW") }
+            ?: "LOW"
+
+        val citationLine = response
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("CITATIONS:", ignoreCase = true) }
+            ?.substringAfter(":")
+            ?.trim()
+            .orEmpty()
+
+        val citationIndexes = if (citationLine.equals("NONE", ignoreCase = true)) {
+            emptyList()
+        } else {
+            Regex("\\d+")
+                .findAll(citationLine)
+                .mapNotNull { it.value.toIntOrNull() }
+                .toList()
+        }
+
+        return GroundedAnswer(
+            answer = answerLine
+                ?.takeIf { it.isNotBlank() }
+                ?: response.trim().lines().firstOrNull().orEmpty(),
+            confidence = confidence,
+            citationIndexes = citationIndexes
+        )
+    }
+
     private fun parseConceptsRobust(response: String): List<ExtractedConcept> {
         val cleaned = stripPromptEcho(response)
         val concepts = mutableListOf<ExtractedConcept>()
@@ -549,7 +485,6 @@ class AIDataSource @Inject constructor(
                         .trim()
                         .removePrefix("[").removeSuffix("]")
                         .trim()
-                    // Skip if this is a known example name from the prompt
                     if (currentName.lowercase() in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
                         currentName = null
                     }
@@ -582,7 +517,6 @@ class AIDataSource @Inject constructor(
                     currentFront = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
-                    // Keep parser generic; prompt examples are neutral and filtered elsewhere if echoed.
                 }
                 cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
                     val back = cleanLine
@@ -645,8 +579,6 @@ class AIDataSource @Inject constructor(
     private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
         val questions = mutableListOf<GeneratedQuizQuestion>()
         val seenTexts = mutableSetOf<String>()
-
-        // Known example question texts from the prompt — skip these if model echoes them
         val exampleTexts = setOf(
             "the french revolution began in 1789",
             "which country did napoleon bonaparte originally come from"
@@ -675,90 +607,26 @@ class AIDataSource @Inject constructor(
             }
 
             if (text.isBlank()) continue
-
-            // Drop echo of prompt examples
-            if (text.trim().lowercase() in exampleTexts) {
-                Log.w(TAG, "Dropping echoed example question: \"$text\"")
-                continue
-            }
-
-            // Drop duplicates within this response
+            if (text.trim().lowercase() in exampleTexts) continue
             val key = text.trim().lowercase()
-            if (key in seenTexts) {
-                Log.w(TAG, "Dropping duplicate question: \"$text\"")
-                continue
-            }
+            if (key in seenTexts) continue
             seenTexts.add(key)
 
-            // Drop MCQ questions that only have True/False as options — model got confused
             val isFakeMcq = type.equals("MCQ", ignoreCase = true) &&
                     options.size == 2 &&
                     options.any { it.equals("True", ignoreCase = true) } &&
                     options.any { it.equals("False", ignoreCase = true) }
-            if (isFakeMcq) {
-                Log.w(TAG, "Dropping MCQ with only True/False options — converting to TRUE_FALSE: \"$text\"")
-                type = "TRUE_FALSE"
-            }
+            if (isFakeMcq) type = "TRUE_FALSE"
 
-            // Normalize correctAnswer to a letter
             val normalizedCorrect = normalizeCorrectAnswer(correct, options)
-
             questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, normalizedCorrect))
         }
         return questions
     }
 
-    private fun parseGroundedAnswer(response: String): GroundedAnswer {
-        val answerLine = response
-            .lineSequence()
-            .firstOrNull { it.trim().startsWith("ANSWER:", ignoreCase = true) }
-            ?.substringAfter(":")
-            ?.trim()
-
-        val confidence = response
-            .lineSequence()
-            .firstOrNull { it.trim().startsWith("CONFIDENCE:", ignoreCase = true) }
-            ?.substringAfter(":")
-            ?.trim()
-            ?.uppercase()
-            ?.takeIf { it in setOf("HIGH", "MEDIUM", "LOW") }
-            ?: "LOW"
-
-        val citationLine = response
-            .lineSequence()
-            .firstOrNull { it.trim().startsWith("CITATIONS:", ignoreCase = true) }
-            ?.substringAfter(":")
-            ?.trim()
-            .orEmpty()
-
-        val citationIndexes = if (citationLine.equals("NONE", ignoreCase = true)) {
-            emptyList()
-        } else {
-            Regex("\\d+")
-                .findAll(citationLine)
-                .mapNotNull { it.value.toIntOrNull() }
-                .toList()
-        }
-
-        return GroundedAnswer(
-            answer = answerLine
-                ?.takeIf { it.isNotBlank() }
-                ?: response.trim().lines().firstOrNull().orEmpty(),
-            confidence = confidence,
-            citationIndexes = citationIndexes
-        )
-    }
-
-    /**
-     * Normalize the CORRECT: field to a single uppercase letter (A, B, C, D).
-     * Handles: bare letter, True/False text, full option text match.
-     */
     private fun normalizeCorrectAnswer(correct: String, options: List<String>): String {
         val trimmed = correct.trim()
-
-        if (trimmed.length == 1 && trimmed.uppercase() in listOf("A", "B", "C", "D")) {
-            return trimmed.uppercase()
-        }
+        if (trimmed.length == 1 && trimmed.uppercase() in listOf("A", "B", "C", "D")) return trimmed.uppercase()
         if (trimmed.equals("true",  ignoreCase = true)) return "A"
         if (trimmed.equals("false", ignoreCase = true)) return "B"
 
@@ -768,8 +636,6 @@ class AIDataSource @Inject constructor(
                     trimmed.lowercase().contains(opt.trim().lowercase())
         }
         if (matchIndex >= 0) return ('A' + matchIndex).toString()
-
-        Log.w(TAG, "Could not normalize correctAnswer: \"$correct\" for options: $options")
         return trimmed.uppercase()
     }
 
@@ -792,6 +658,8 @@ data class GroundedAnswer(
     val confidence: String,
     val citationIndexes: List<Int>
 )
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data and state classes (unchanged)

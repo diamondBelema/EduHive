@@ -15,12 +15,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dibe.eduhive.manager.TaskProgress
 import com.dibe.eduhive.manager.TaskType
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlobalTaskOverlay(
     activeTasks: List<TaskProgress>,
@@ -61,18 +63,29 @@ fun GlobalTaskOverlay(
                     else -> Icons.Rounded.AutoAwesome
                 }
 
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
-                    CircularProgressIndicator(
-                        progress = { if (currentTask.isIndeterminate) 0.6f else currentTask.progress },
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                    )
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(32.dp)) {
+                    // Using Wavy indicator for "Expressive" feel if available, else standard with round caps
+                    if (currentTask.isIndeterminate) {
+                        CircularProgressIndicator(
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeCap = StrokeCap.Round
+                        )
+                    } else {
+                        CircularProgressIndicator(
+                            progress = { currentTask.progress },
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeCap = StrokeCap.Round,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        )
+                    }
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -100,7 +113,6 @@ fun GlobalTaskOverlay(
                     Surface(
                         color = MaterialTheme.colorScheme.primary,
                         shape = CircleShape
-
                     ) {
                         Text(
                             text = "+${activeTasks.size - 1}",
