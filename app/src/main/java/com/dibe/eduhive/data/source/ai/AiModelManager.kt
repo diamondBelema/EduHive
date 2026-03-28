@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,6 +58,48 @@ class AIModelManager @Inject constructor(
     private var loadedMaxTokens: Int = 0
     private var currentConfig: GenerationConfig = GenerationConfig()
     private val inferenceMutex = Mutex()
+
+    /**
+     * Reference count for active processing sessions.
+     *
+     * When > 0, [unloadModel] will not actually unload the model — it only marks it
+     * for deferred unloading once all sessions end via [releaseModelRef].
+     * This prevents expensive reload cycles during multi-step pipelines
+     * (e.g. concept extraction → flashcard generation).
+     */
+    private val activeSessionRefs = AtomicInteger(0)
+    private var pendingUnload = false
+
+    /**
+     * Increment the active-session reference count.
+     * Call at the start of a multi-step pipeline to keep the model warm.
+     * Must be paired with exactly one [releaseModelRef] call.
+     */
+    fun retainModelRef() {
+        activeSessionRefs.incrementAndGet()
+        pendingUnload = false
+        Log.d(TAG, "retainModelRef: refs=${activeSessionRefs.get()}")
+    }
+
+    /**
+     * Decrement the active-session reference count.
+     * If the count reaches 0 and [unloadModel] was requested while refs were held,
+     * the model is unloaded now.
+     */
+    suspend fun releaseModelRef() {
+        val raw = activeSessionRefs.decrementAndGet()
+        if (raw < 0) {
+            // Mismatched retain/release calls — reset to 0 and log for debugging
+            activeSessionRefs.set(0)
+            Log.e(TAG, "releaseModelRef called without a matching retainModelRef (count was $raw); reset to 0")
+        }
+        val remaining = raw.coerceAtLeast(0)
+        Log.d(TAG, "releaseModelRef: refs=$remaining pendingUnload=$pendingUnload")
+        if (remaining == 0 && pendingUnload) {
+            pendingUnload = false
+            unloadModel()
+        }
+    }
 
     fun hasModelReady(): Boolean {
         val modelId = modelPreferences.getActiveModel() ?: return false
@@ -297,6 +340,12 @@ class AIModelManager @Inject constructor(
     fun isModelLoaded(): Boolean = llmInference != null
 
     suspend fun unloadModel(): Result<Unit> = withContext(Dispatchers.IO) {
+        // If a pipeline session is active, defer the unload.
+        if (activeSessionRefs.get() > 0) {
+            pendingUnload = true
+            Log.d(TAG, "unloadModel deferred: ${activeSessionRefs.get()} active refs")
+            return@withContext Result.success(Unit)
+        }
         inferenceMutex.withLock {
             try {
                 llmInference?.close()

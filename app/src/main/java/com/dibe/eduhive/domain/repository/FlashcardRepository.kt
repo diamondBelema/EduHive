@@ -59,7 +59,8 @@ interface FlashcardRepository {
         conceptId: String,
         conceptName: String,
         conceptDescription: String?,
-        count: Int
+        count: Int,
+        skipValidation: Boolean = false
     ): Flow<FlashcardGenerationProgress>
 
     /**

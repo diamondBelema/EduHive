@@ -169,8 +169,19 @@ class AskHiveQuestionUseCase @Inject constructor(
         val overlaps = queryTokens.count { it in textTokens }
         val overlapScore = overlaps.toDouble() / queryTokens.size
 
+        // Bonus for exact phrase match in the text
         val phraseBonus = if (text.lowercase().contains(question.trim().lowercase())) 0.25 else 0.0
-        return overlapScore + phraseBonus
+
+        // Bonus for specific/longer terms (> 6 chars) — these are more discriminating
+        val specificTermBonus = queryTokens
+            .filter { it.length > 6 }
+            .count { it in textTokens } * 0.08
+
+        // Bonus when the text explicitly contains educational keywords from the question
+        val educationalBonus = queryTokens
+            .count { it in EDUCATIONAL_KEYWORDS && it in textTokens } * 0.10
+
+        return overlapScore + phraseBonus + specificTermBonus + educationalBonus
     }
 
     private fun tokenize(value: String): Set<String> {
@@ -183,14 +194,40 @@ class AskHiveQuestionUseCase @Inject constructor(
     }
 
     companion object {
-        private const val MAX_CONTEXT_CHUNKS = 4
-        private const val MAX_CHARS_PER_CHUNK = 420
+        /** Increased from 4 → 7 to provide richer context to the model. */
+        private const val MAX_CONTEXT_CHUNKS = 7
+        /** Increased from 420 → 600 to capture more of each retrieved passage. */
+        private const val MAX_CHARS_PER_CHUNK = 600
         private const val MIN_CONFIDENT_SCORE = 0.18
 
+        /**
+         * Stop words deliberately exclude question/interrogative words (what, when, where, which)
+         * so that the lexical scorer can still match them against context chunks that
+         * contain definitions and explanatory sentences.
+         */
         private val STOP_WORDS = setOf(
-            "the", "and", "for", "that", "this", "with", "from", "into", "about", "what",
-            "when", "where", "which", "have", "has", "are", "was", "were", "your", "their",
+            "the", "and", "for", "that", "this", "with", "from", "into", "about",
+            "have", "has", "are", "was", "were", "your", "their",
             "will", "would", "could", "should", "than", "then", "been", "being", "can"
+        )
+
+        /**
+         * Common educational/instructional terms that signal relevance.
+         * When a query token AND a chunk token both belong to this set, a small
+         * bonus is applied to the lexical score.
+         */
+        private val EDUCATIONAL_KEYWORDS = setOf(
+            "define", "defined", "definition", "explain", "explained", "explanation",
+            "describe", "described", "description", "compare", "contrast",
+            "analyze", "analyse", "evaluate", "summarize", "summarise",
+            "theory", "theories", "concept", "concepts", "principle", "principles",
+            "law", "laws", "effect", "effects", "cause", "causes",
+            "process", "processes", "method", "methods", "function", "functions",
+            "structure", "structures", "type", "types", "example", "examples",
+            "difference", "differences", "relationship", "relationships",
+            "factor", "factors", "role", "roles", "purpose", "result", "results",
+            "mechanism", "mechanisms", "property", "properties", "characteristic",
+            "characteristics", "component", "components", "system", "systems"
         )
     }
 }

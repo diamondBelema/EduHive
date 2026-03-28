@@ -131,12 +131,14 @@ object UseCaseModule {
         materialRepository: MaterialRepository,
         conceptRepository: ConceptRepository,
         flashcardRepository: FlashcardRepository,
-        fileDataSource: FileDataSource
+        fileDataSource: FileDataSource,
+        aiDataSource: AIDataSource
     ) = AddMaterialUseCase(
         fileDataSource,
         materialRepository,
         conceptRepository,
-        flashcardRepository
+        flashcardRepository,
+        aiDataSource
     )
 
     @Provides

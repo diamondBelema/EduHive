@@ -3,6 +3,7 @@ package com.dibe.eduhive.domain.usecase.material
 import android.net.Uri
 import com.dibe.eduhive.data.repository.ConceptExtractionProgress
 import com.dibe.eduhive.data.repository.FlashcardGenerationProgress
+import com.dibe.eduhive.data.source.ai.AIDataSource
 import com.dibe.eduhive.data.source.file.FileDataSource
 import com.dibe.eduhive.domain.model.Material
 import com.dibe.eduhive.domain.model.MaterialType
@@ -24,14 +25,25 @@ import javax.inject.Inject
  * 2. Save material metadata to DB.
  * 3. Extract concepts using AI with streaming updates.
  * 4. Generate flashcards for each extracted concept.
+ *    - Small files (< 5 pages): fast-track with single attempt, no validation.
+ *    - Larger files: batch generation (3 concepts per AI call = 3× speedup).
  * 5. Mark as processed.
  */
 class AddMaterialUseCase @Inject constructor(
     private val fileDataSource: FileDataSource,
     private val materialRepository: MaterialRepository,
     private val conceptRepository: ConceptRepository,
-    private val flashcardRepository: FlashcardRepository
+    private val flashcardRepository: FlashcardRepository,
+    private val aiDataSource: AIDataSource
 ) {
+
+    companion object {
+        /** Files with fewer pages use fast-track: no validation, 1 retry. */
+        private const val SMALL_FILE_PAGE_THRESHOLD = 5
+        /** Concepts grouped per AI call in the standard batch path. */
+        private const val FLASHCARD_BATCH_SIZE = 3
+        private const val FLASHCARDS_PER_CONCEPT = 3
+    }
 
     @OptIn(DelicateCoroutinesApi::class)
     operator fun invoke(
@@ -41,6 +53,9 @@ class AddMaterialUseCase @Inject constructor(
         hiveContext: String = ""
     ): Flow<MaterialProcessingProgress> = channelFlow {
         send(MaterialProcessingProgress.Started)
+
+        // Retain the model for the full pipeline to avoid unload/reload between steps
+        aiDataSource.retainModelForPipeline()
 
         try {
             // 1. Extract text pages from file
@@ -59,6 +74,9 @@ class AddMaterialUseCase @Inject constructor(
 
             val totalChars = extractedPages.sumOf { it.length }
             send(MaterialProcessingProgress.TextExtracted(totalChars))
+
+            // Detect small/simple documents for fast-track processing
+            val isSmallFile = extractedPages.size < SMALL_FILE_PAGE_THRESHOLD
 
             // 2. Detect material type and save metadata
             val materialType = detectMaterialType(uri)
@@ -97,8 +115,6 @@ class AddMaterialUseCase @Inject constructor(
                     }
                     is ConceptExtractionProgress.Error -> {
                         send(MaterialProcessingProgress.Failed("Concept extraction failed: ${progress.message}"))
-                        // We continue to generate flashcards if we got at least some concepts earlier? 
-                        // No, for now we fail if extraction fails.
                     }
                     else -> {}
                 }
@@ -110,50 +126,79 @@ class AddMaterialUseCase @Inject constructor(
                 return@channelFlow
             }
 
-            // 4. Generate flashcards for each concept, tracking quality metrics
+            // 4. Generate flashcards
+            //    - Small files: fast-track streaming (1 attempt per concept, no validation)
+            //    - Large files: batch generation (1 AI call per 3 concepts — 3× speedup)
             var totalValid = 0
             var totalRejected = 0
             val seenFronts = mutableSetOf<String>()
             var duplicatesFound = 0
 
-            finalConcepts.forEachIndexed { index, concept ->
-                send(MaterialProcessingProgress.GeneratingFlashcards(index + 1, finalConcepts.size))
-                send(MaterialProcessingProgress.ValidatingFlashcards(index + 1, finalConcepts.size))
+            if (isSmallFile) {
+                // Fast-track path: individual streaming with skipValidation=true
+                finalConcepts.forEachIndexed { index, concept ->
+                    send(MaterialProcessingProgress.GeneratingFlashcards(index + 1, finalConcepts.size))
 
-                flashcardRepository.generateFlashcardsForConceptStreaming(
-                    conceptId = concept.id,
-                    conceptName = concept.name,
-                    conceptDescription = concept.description ?: "",
-                    count = 3
-                ).collect { progress ->
-                    when (progress) {
-                        is FlashcardGenerationProgress.Retrying -> {
-                            send(MaterialProcessingProgress.RetryingGeneration(concept.name, progress.attempt))
-                        }
-                        is FlashcardGenerationProgress.Success -> {
-                            totalValid += progress.flashcards.size
-                            totalRejected += progress.rejectedCount
-
-                            // Cross-concept duplicate detection
-                            for (flashcard in progress.flashcards) {
-                                val key = flashcard.front.lowercase().trim()
-                                if (key in seenFronts) duplicatesFound++ else seenFronts.add(key)
+                    flashcardRepository.generateFlashcardsForConceptStreaming(
+                        conceptId = concept.id,
+                        conceptName = concept.name,
+                        conceptDescription = concept.description ?: "",
+                        count = FLASHCARDS_PER_CONCEPT,
+                        skipValidation = true
+                    ).collect { progress ->
+                        when (progress) {
+                            is FlashcardGenerationProgress.Success -> {
+                                totalValid += progress.flashcards.size
+                                for (flashcard in progress.flashcards) {
+                                    val key = flashcard.front.lowercase().trim()
+                                    if (key in seenFronts) duplicatesFound++ else seenFronts.add(key)
+                                }
+                                send(MaterialProcessingProgress.ValidationProgress(
+                                    current = index + 1,
+                                    total = finalConcepts.size,
+                                    valid = totalValid,
+                                    flagged = 0,
+                                    rejected = 0
+                                ))
                             }
-
-                            send(MaterialProcessingProgress.ValidationProgress(
-                                current = index + 1,
-                                total = finalConcepts.size,
-                                valid = totalValid,
-                                flagged = 0,
-                                rejected = totalRejected
-                            ))
+                            else -> { /* Loading/Retrying/Validating states are informational only */ }
                         }
-                        else -> {}
                     }
+                    delay(50)
                 }
+            } else {
+                // Standard path: batch generation (3 concepts per AI call)
+                val batches = finalConcepts.chunked(FLASHCARD_BATCH_SIZE)
+                batches.forEachIndexed { batchIndex, batch ->
+                    val batchStart = batchIndex * FLASHCARD_BATCH_SIZE + 1
+                    val batchEnd = minOf(batchStart + batch.size - 1, finalConcepts.size)
 
-                // Brief delay for thermal safety and UI smoothness
-                delay(50)
+                    send(MaterialProcessingProgress.GeneratingFlashcards(batchStart, finalConcepts.size))
+                    send(MaterialProcessingProgress.ValidatingFlashcards(batchStart, finalConcepts.size))
+
+                    val conceptTriples = batch.map { concept ->
+                        Triple(concept.id, concept.name, concept.description)
+                    }
+                    val batchFlashcards = flashcardRepository.generateFlashcardsForConceptsBatch(
+                        concepts = conceptTriples,
+                        countPerConcept = FLASHCARDS_PER_CONCEPT
+                    )
+
+                    totalValid += batchFlashcards.size
+                    for (flashcard in batchFlashcards) {
+                        val key = flashcard.front.lowercase().trim()
+                        if (key in seenFronts) duplicatesFound++ else seenFronts.add(key)
+                    }
+
+                    send(MaterialProcessingProgress.ValidationProgress(
+                        current = batchEnd,
+                        total = finalConcepts.size,
+                        valid = totalValid,
+                        flagged = 0,
+                        rejected = totalRejected
+                    ))
+                    delay(50)
+                }
             }
 
             // 5. Finalize
@@ -175,6 +220,8 @@ class AddMaterialUseCase @Inject constructor(
 
         } catch (e: Exception) {
             send(MaterialProcessingProgress.Failed(e.message ?: "Unknown error occurred"))
+        } finally {
+            aiDataSource.releaseModelRef()
         }
     }
 

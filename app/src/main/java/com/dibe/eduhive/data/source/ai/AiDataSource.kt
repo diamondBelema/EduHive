@@ -214,11 +214,13 @@ class AIDataSource @Inject constructor(
     fun generateFlashcardsStreaming(
         conceptName: String,
         conceptDescription: String,
-        count: Int = FLASHCARDS_PER_CONCEPT
+        count: Int = FLASHCARDS_PER_CONCEPT,
+        skipValidation: Boolean = false
     ): Flow<FlashcardGenerationState> = channelFlow {
         send(FlashcardGenerationState.Loading)
 
-        if (!ensureModelLoaded(GenerationConfig.FLASHCARD)) {
+        val config = if (skipValidation) GenerationConfig.FAST_TRACK_FLASHCARD else GenerationConfig.FLASHCARD
+        if (!ensureModelLoaded(config)) {
             send(FlashcardGenerationState.Error("No model available"))
             return@channelFlow
         }
@@ -227,6 +229,7 @@ class AIDataSource @Inject constructor(
             conceptName = conceptName,
             conceptDescription = conceptDescription,
             count = count,
+            skipValidation = skipValidation,
             onRetrying = { attempt -> send(FlashcardGenerationState.Retrying(attempt)) }
         )
         send(FlashcardGenerationState.Validating)
@@ -237,13 +240,15 @@ class AIDataSource @Inject constructor(
     suspend fun generateFlashcards(
         conceptName: String,
         conceptDescription: String,
-        count: Int = FLASHCARDS_PER_CONCEPT
+        count: Int = FLASHCARDS_PER_CONCEPT,
+        skipValidation: Boolean = false
     ): Result<List<GeneratedFlashcard>> = withContext(Dispatchers.IO) {
         try {
-            if (!ensureModelLoaded(GenerationConfig.FLASHCARD)) {
+            val config = if (skipValidation) GenerationConfig.FAST_TRACK_FLASHCARD else GenerationConfig.FLASHCARD
+            if (!ensureModelLoaded(config)) {
                 return@withContext Result.failure(IllegalStateException("No model available"))
             }
-            val result = generateWithValidation(conceptName, conceptDescription, count)
+            val result = generateWithValidation(conceptName, conceptDescription, count, skipValidation)
             Result.success(result.flashcards)
         } catch (e: Exception) {
             Result.failure(e)
@@ -363,10 +368,23 @@ class AIDataSource @Inject constructor(
         conceptName: String,
         conceptDescription: String,
         count: Int,
+        skipValidation: Boolean = false,
         onRetrying: suspend (Int) -> Unit = {}
     ): ValidationResult {
         val safeDesc = conceptDescription.take(MAX_INPUT_CHARS_FLASHCARDS)
         val basePrompt = LLMPromptTemplates.flashcardDraft(conceptName, safeDesc, count)
+
+        // Fast-track: single attempt, accept output as-is (no refinement pass)
+        if (skipValidation) {
+            val result = modelManager.generate(basePrompt)
+            result.onSuccess { response ->
+                val parsed = parseFlashcardsRobust(response)
+                return ValidationResult(parsed, 0)
+            }.onFailure { e ->
+                Log.w(TAG, "Fast-track generation failed for \"$conceptName\": ${e.message}")
+            }
+            return ValidationResult(emptyList(), 0)
+        }
 
         var bestDraft: List<GeneratedFlashcard> = emptyList()
         var bestPassRate = 0f
@@ -448,6 +466,20 @@ class AIDataSource @Inject constructor(
         val modelId = modelPreferences.getActiveModel() ?: return false
         return modelManager.loadModel(modelId, config).isSuccess
     }
+
+    /**
+     * Retain the model for a multi-step processing pipeline.
+     * Prevents mid-pipeline unloads that would require an expensive reload.
+     * Must be paired with exactly one [releaseModelRef] call.
+     */
+    fun retainModelForPipeline() = modelManager.retainModelRef()
+
+    /**
+     * Release the pipeline model reference acquired via [retainModelForPipeline].
+     * If no other references are held and an unload was requested during the
+     * pipeline, the model will be unloaded now.
+     */
+    suspend fun releaseModelRef() = modelManager.releaseModelRef()
 
     // ─────────────────────────────────────────────────────────────────────────
     // Parsers
