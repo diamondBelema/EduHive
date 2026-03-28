@@ -18,7 +18,6 @@ import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.repository.MaterialRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.delay
 import java.util.UUID
 
 @HiltWorker
@@ -49,9 +48,9 @@ class MaterialProcessingWorker @AssistedInject constructor(
         try {
             // 1. Extract text pages
             if (isStopped) return Result.failure()
-            
+
             setProgress(workDataOf(KEY_HIVE_ID to hiveId, KEY_TITLE to title, KEY_STATUS to "Reading file...", KEY_PROGRESS to 5))
-            
+
             val extractedPages = fileDataSource.extractTextPages(uri).getOrElse { error ->
                 cancelNotification()
                 return Result.failure(workDataOf(KEY_ERROR to (error.message ?: "Failed to extract text"), KEY_HIVE_ID to hiveId))
@@ -76,7 +75,7 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 createdAt = System.currentTimeMillis()
             )
             materialRepository.addMaterial(material)
-            
+
             if (isStopped) return Result.failure()
 
             // 3. Extract concepts
@@ -90,7 +89,7 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 hiveContext = hiveContext
             ).collect { progress ->
                 if (isStopped) return@collect
-                
+
                 if (progress is ConceptExtractionProgress.Processing) {
                     val p = 15 + (progress.percent * 0.35).toInt()
                     setProgress(workDataOf(KEY_HIVE_ID to hiveId, KEY_TITLE to title, KEY_PROGRESS to p, KEY_STATUS to "Analyzing... ${progress.percent}%"))
@@ -108,10 +107,10 @@ class MaterialProcessingWorker @AssistedInject constructor(
             var totalValid = 0
             val totalConcepts = finalConcepts.size
             val failedConcepts = mutableListOf<String>()
-            
+
             finalConcepts.forEachIndexed { index, concept ->
                 if (isStopped) return@forEachIndexed
-                
+
                 val conceptProgress = 50 + ((index.toFloat() / totalConcepts) * 45).toInt()
                 setProgress(workDataOf(
                     KEY_STATUS to "Concept ${index + 1}/$totalConcepts: ${concept.name}",
@@ -144,15 +143,14 @@ class MaterialProcessingWorker @AssistedInject constructor(
                     android.util.Log.e("MaterialWorker", "Failed cards for ${concept.name}", e)
                     failedConcepts.add(concept.name)
                 }
-                
-                delay(50)
+
             }
 
             if (isStopped) return Result.failure(workDataOf(KEY_STATUS to "Cancelled", KEY_HIVE_ID to hiveId))
 
             // 5. Finalize
             materialRepository.markAsProcessed(material.id)
-            
+
             val summary = if (failedConcepts.isEmpty()) {
                 "Successfully created $totalValid flashcards from all $totalConcepts concepts."
             } else {
@@ -168,7 +166,7 @@ class MaterialProcessingWorker @AssistedInject constructor(
                 KEY_TOTAL_CONCEPTS to totalConcepts,
                 KEY_SUMMARY to summary
             ))
-            
+
             val completionNotification = NotificationHelper.getBaseNotification(context, "Processing Complete", "Added $totalValid cards to \"$title\"")
                 .setOngoing(false).setAutoCancel(true).build()
             notificationManager.notify(COMPLETION_NOTIFICATION_ID, completionNotification)
@@ -216,16 +214,16 @@ class MaterialProcessingWorker @AssistedInject constructor(
         const val KEY_HIVE_ID = "hiveId"
         const val KEY_TITLE = "title"
         const val KEY_HIVE_CONTEXT = "hiveContext"
-        
+
         const val KEY_PROGRESS = "progress"
         const val KEY_STATUS = "status"
         const val KEY_ERROR = "error"
         const val KEY_SUMMARY = "summary"
-        
+
         const val KEY_MATERIAL_ID = "materialId"
         const val KEY_CONCEPTS_COUNT = "conceptsCount"
         const val KEY_FLASHCARDS_COUNT = "flashcardsCount"
-        
+
         const val KEY_VALID_COUNT = "validCount"
         const val KEY_REJECTED_COUNT = "rejectedCount"
         const val KEY_CURRENT_CONCEPT = "currentConcept"

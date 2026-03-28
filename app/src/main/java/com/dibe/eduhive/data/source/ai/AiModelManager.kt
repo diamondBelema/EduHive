@@ -208,7 +208,7 @@ class AIModelManager @Inject constructor(
                 if (!modelFile.exists()) return@withLock Result.failure(Exception("Model file not found"))
 
                 currentConfig = config
-                
+
                 // Explicitly close previous engine to release native resources
                 llmInference?.close()
                 llmInference = null
@@ -278,11 +278,16 @@ class AIModelManager @Inject constructor(
             Result.success(response)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Generation failed, reinitializing model", e)
-            unloadModel()
-            delay(500)
-            val activeModel = modelPreferences.getActiveModel()
-            if (activeModel != null) loadModel(activeModel)
+            Log.e(TAG, "Generation failed: ${e.message}", e)
+            // Only reload if no pipeline is holding the model (refs == 0).
+            // Reloading during a multi-step pipeline (concept→flashcard) wastes 3-5s
+            // and the next call to generate() will fail fast if the engine is actually gone.
+            if (activeSessionRefs.get() == 0) {
+                unloadModel()
+                delay(500)
+                val activeModel = modelPreferences.getActiveModel()
+                if (activeModel != null) loadModel(activeModel)
+            }
             Result.failure(e)
         }
     }
