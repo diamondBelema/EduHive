@@ -73,14 +73,16 @@ class FlashcardRepositoryImpl @Inject constructor(
         conceptId: String,
         conceptName: String,
         conceptDescription: String?,
-        count: Int
+        count: Int,
+        skipValidation: Boolean
     ): Flow<FlashcardGenerationProgress> = flow {
         emit(FlashcardGenerationProgress.Loading)
 
         aiDataSource.generateFlashcardsStreaming(
             conceptName = conceptName,
             conceptDescription = conceptDescription ?: "",
-            count = count
+            count = count,
+            skipValidation = skipValidation
         ).collect { state ->
             when (state) {
                 is FlashcardGenerationState.Loading -> {
@@ -129,7 +131,7 @@ class FlashcardRepositoryImpl @Inject constructor(
         var result: List<Flashcard> = emptyList()
 
         generateFlashcardsForConceptStreaming(
-            conceptId, conceptName, conceptDescription, count
+            conceptId, conceptName, conceptDescription, count, skipValidation = false
         ).collect { progress ->
             when (progress) {
                 is FlashcardGenerationProgress.Success -> {

@@ -126,14 +126,19 @@ fun AddMaterialScreen(
                 if (isProcessing && currentWork != null) {
                     val progress = currentWork.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0) / 100f
                     val status = currentWork.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Queued..."
+                    val validCount = currentWork.progress.getInt(MaterialProcessingWorker.KEY_VALID_COUNT, 0)
+                    val rejectedCount = currentWork.progress.getInt(MaterialProcessingWorker.KEY_REJECTED_COUNT, 0)
+                    val currentConcept = currentWork.progress.getInt(MaterialProcessingWorker.KEY_CURRENT_CONCEPT, 0)
+                    val totalConcepts = currentWork.progress.getInt(MaterialProcessingWorker.KEY_TOTAL_CONCEPTS, 0)
                     
                     ProcessingStateExpressive(
                         status = status,
                         progress = progress,
                         successMessage = state.successMessage,
-                        flashcardsValid = currentWork.progress.getInt(MaterialProcessingWorker.KEY_FLASHCARDS_COUNT, 0),
-                        flashcardsRejected = 0,
-                        duplicatesFound = 0
+                        flashcardsValid = validCount,
+                        flashcardsRejected = rejectedCount,
+                        currentConcept = currentConcept,
+                        totalConcepts = totalConcepts
                     )
                 } else {
                     ImportSelectionExpressive(
@@ -295,7 +300,8 @@ fun ProcessingStateExpressive(
     successMessage: String?,
     flashcardsValid: Int = 0,
     flashcardsRejected: Int = 0,
-    duplicatesFound: Int = 0
+    currentConcept: Int = 0,
+    totalConcepts: Int = 0
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -380,6 +386,44 @@ fun ProcessingStateExpressive(
                 )
             }
         }
+
+        // Quality metrics row — shown once we start generating flashcards
+        AnimatedVisibility(
+            visible = successMessage == null && (flashcardsValid > 0 || totalConcepts > 0),
+            enter = slideInVertically { it / 2 } + fadeIn()
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(top = 20.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+            ) {
+                if (totalConcepts > 0) {
+                    QualityChip(
+                        label = "Concepts",
+                        value = if (currentConcept > 0) "$currentConcept/$totalConcepts" else "$totalConcepts",
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        textColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                if (flashcardsValid > 0) {
+                    QualityChip(
+                        label = "Cards",
+                        value = "$flashcardsValid",
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        textColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+                if (flashcardsRejected > 0) {
+                    QualityChip(
+                        label = "Filtered",
+                        value = "$flashcardsRejected",
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        textColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
         
         AnimatedVisibility(
             visible = successMessage != null,
@@ -399,6 +443,36 @@ fun ProcessingStateExpressive(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QualityChip(
+    label: String,
+    value: String,
+    color: Color,
+    textColor: Color
+) {
+    Surface(
+        color = color,
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = textColor
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = textColor.copy(alpha = 0.75f)
+            )
         }
     }
 }
