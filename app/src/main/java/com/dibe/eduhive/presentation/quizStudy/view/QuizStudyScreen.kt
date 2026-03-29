@@ -3,7 +3,6 @@ package com.dibe.eduhive.presentation.quizStudy.view
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -13,6 +12,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Quiz
 import androidx.compose.material3.*
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -25,7 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.window.core.layout.WindowWidthSizeClass
 import com.dibe.eduhive.domain.model.Quiz
 import com.dibe.eduhive.domain.model.QuizQuestion
@@ -59,6 +59,9 @@ fun QuizStudyScreen(
     var isSubmitted by remember { mutableStateOf(false) }
     val selectedByQuestionId = remember { mutableStateMapOf<String, String>() }
     var correctCount by remember { mutableIntStateOf(0) }
+    
+    // Feedback state
+    var showFeedback by remember { mutableStateOf(false) }
 
     // Start timer for the first question
     LaunchedEffect(questions, index) {
@@ -118,159 +121,88 @@ fun QuizStudyScreen(
                     val selectedAnswer = selectedByQuestionId[question.id]
                     val options = question.options ?: listOf("True", "False")
                     
-                    // Adaptive layout logic
-                    val isExpanded = windowSizeClass.windowWidthSizeClass != WindowWidthSizeClass.COMPACT
+                    val isCorrect = selectedAnswer != null && isAnswerCorrect(selectedAnswer, question.correctAnswer)
 
-                    if (isExpanded) {
-                        Row(
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        // Progress
+                        LinearProgressIndicator(
+                            progress = { (index.toFloat() + 1) / questions.size },
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(32.dp),
-                            horizontalArrangement = Arrangement.spacedBy(48.dp)
-                        ) {
-                            // Question Side
-                            ElevatedCard(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                colors = CardDefaults.elevatedCardColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(32.dp)
-                                        .verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Quiz, 
-                                        contentDescription = null, 
-                                        modifier = Modifier.size(48.dp),
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
-                                    Spacer(Modifier.height(24.dp))
-                                    Text(
-                                        text = question.question,
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        textAlign = TextAlign.Center,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
-                                }
-                            }
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(CircleShape),
+                            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
 
-                            // Options Side
-                            Column(
-                                modifier = Modifier
-                                    .weight(0.8f)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                        // Scrollable content area
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                        ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = MaterialTheme.shapes.extraLarge,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    "Choose an answer",
+                                    text = question.question,
+                                    modifier = Modifier.padding(24.dp),
                                     style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Black
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    lineHeight = 32.sp
                                 )
-                                Spacer(Modifier.height(8.dp))
-                                
-                                options.forEachIndexed { optIndex, optionText ->
-                                    val letter = ('A' + optIndex).toString()
-                                    QuizOptionExpressive(
-                                        letter = letter,
-                                        text = optionText,
-                                        isSelected = selectedAnswer == letter,
-                                        onClick = { selectedByQuestionId[question.id] = letter }
-                                    )
-                                }
+                            }
 
-                                Spacer(Modifier.weight(1f))
+                            options.forEachIndexed { optIndex, optionText ->
+                                val letter = ('A' + optIndex).toString()
+                                val isOptionSelected = selectedAnswer == letter
                                 
-                                QuizNavigationButton(
-                                    isLast = index >= questions.lastIndex,
-                                    enabled = selectedAnswer != null,
-                                    onClick = {
-                                        if (index < questions.lastIndex) {
-                                            index += 1
-                                        } else {
-                                            viewModel.submitResults(selectedByQuestionId)
-                                            correctCount = questions.count { q ->
-                                                isAnswerCorrect(selectedByQuestionId[q.id], q.correctAnswer)
+                                QuizOptionExpressive(
+                                    letter = letter,
+                                    text = optionText,
+                                    isSelected = isOptionSelected,
+                                    isCorrect = if (showFeedback) letter == question.correctAnswer.trim().uppercase() else null,
+                                    showFeedback = showFeedback,
+                                    onClick = { 
+                                        if (!showFeedback) {
+                                            selectedByQuestionId[question.id] = letter
+                                            showFeedback = true
+                                            if (isAnswerCorrect(letter, question.correctAnswer)) {
+                                                correctCount++
                                             }
-                                            isSubmitted = true
                                         }
                                     }
                                 )
                             }
                         }
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            verticalArrangement = Arrangement.spacedBy(24.dp)
+
+                        AnimatedVisibility(
+                            visible = showFeedback,
+                            enter = slideInVertically { it } + fadeIn(),
+                            exit = slideOutVertically { it } + fadeOut()
                         ) {
-                            // Progress
-                            LinearProgressIndicator(
-                                progress = { (index.toFloat() + 1) / questions.size },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(CircleShape),
-                                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-                            )
-
-                            // Scrollable content area
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(20.dp)
-                            ) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    shape = MaterialTheme.shapes.extraLarge,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = question.question,
-                                        modifier = Modifier.padding(24.dp),
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        lineHeight = 32.sp
-                                    )
-                                }
-
-                                options.forEachIndexed { optIndex, optionText ->
-                                    val letter = ('A' + optIndex).toString()
-                                    QuizOptionExpressive(
-                                        letter = letter,
-                                        text = optionText,
-                                        isSelected = selectedAnswer == letter,
-                                        onClick = { selectedByQuestionId[question.id] = letter }
-                                    )
-                                }
-                            }
-
-                            QuizNavigationButton(
-                                isLast = index >= questions.lastIndex,
-                                enabled = selectedAnswer != null,
-                                onClick = {
+                            FeedbackSection(
+                                isCorrect = isCorrect,
+                                correctAnswer = question.correctAnswer,
+                                options = options,
+                                onNext = {
                                     if (index < questions.lastIndex) {
                                         index += 1
+                                        showFeedback = false
                                     } else {
                                         viewModel.submitResults(selectedByQuestionId)
-                                        correctCount = questions.count { q ->
-                                            isAnswerCorrect(selectedByQuestionId[q.id], q.correctAnswer)
-                                        }
                                         isSubmitted = true
                                     }
-                                }
+                                },
+                                isLast = index >= questions.lastIndex
                             )
                         }
                     }
@@ -285,14 +217,30 @@ private fun QuizOptionExpressive(
     letter: String,
     text: String,
     isSelected: Boolean,
+    isCorrect: Boolean?,
+    showFeedback: Boolean,
     onClick: () -> Unit
 ) {
+    val backgroundColor = when {
+        showFeedback && isCorrect == true -> Color(0xFFE8F5E9) // Light Green
+        showFeedback && isSelected && isCorrect == false -> Color(0xFFFFEBEE) // Light Red
+        isSelected -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    val borderColor = when {
+        showFeedback && isCorrect == true -> Color(0xFF4CAF50)
+        showFeedback && isSelected && isCorrect == false -> Color(0xFFF44336)
+        isSelected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
+
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = backgroundColor,
+        border = androidx.compose.foundation.BorderStroke(2.dp, borderColor),
         tonalElevation = if (isSelected) 2.dp else 0.dp
     ) {
         Row(
@@ -300,54 +248,102 @@ private fun QuizOptionExpressive(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                color = when {
+                    showFeedback && isCorrect == true -> Color(0xFF4CAF50)
+                    showFeedback && isSelected && isCorrect == false -> Color(0xFFF44336)
+                    isSelected -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.surfaceVariant
+                },
                 shape = CircleShape,
                 modifier = Modifier.size(32.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        letter, 
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (showFeedback && isCorrect == true) {
+                        Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    } else if (showFeedback && isSelected && isCorrect == false) {
+                        Icon(Icons.Rounded.Close, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text(
+                            letter, 
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(16.dp))
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                color = if (showFeedback && isCorrect == true) Color(0xFF1B5E20) 
+                        else if (showFeedback && isSelected && isCorrect == false) Color(0xFFB71C1C)
+                        else MaterialTheme.colorScheme.onSurface
             )
         }
     }
 }
 
 @Composable
-private fun QuizNavigationButton(
-    isLast: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit
+private fun FeedbackSection(
+    isCorrect: Boolean,
+    correctAnswer: String,
+    options: List<String>,
+    onNext: () -> Unit,
+    isLast: Boolean
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(64.dp),
-        shape = MaterialTheme.shapes.extraLarge
+    Surface(
+        color = if (isCorrect) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (isLast) "Submit Results" else "Next Question",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.width(12.dp))
-            Icon(
-                if (isLast) Icons.AutoMirrored.Rounded.Send else Icons.AutoMirrored.Rounded.NavigateNext,
-                contentDescription = null
-            )
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (isCorrect) Icons.Rounded.CheckCircle else Icons.Rounded.Close,
+                    contentDescription = null,
+                    tint = if (isCorrect) Color(0xFF4CAF50) else Color(0xFFF44336)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (isCorrect) "Excellent!" else "Not quite right",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isCorrect) Color(0xFF2E7D32) else Color(0xFFC62828)
+                )
+            }
+            
+            if (!isCorrect) {
+                val correctText = remember(correctAnswer, options) {
+                    val idx = correctAnswer.trim().uppercase().firstOrNull()?.minus('A') ?: -1
+                    if (idx in options.indices) options[idx] else correctAnswer
+                }
+                Text(
+                    "The correct answer is: $correctText",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFC62828),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = onNext,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isCorrect) Color(0xFF4CAF50) else Color(0xFFF44336)
+                )
+            ) {
+                Text(if (isLast) "Finish Quiz" else "Next Question")
+                Spacer(Modifier.width(8.dp))
+                Icon(if (isLast) Icons.AutoMirrored.Rounded.Send else Icons.AutoMirrored.Rounded.NavigateNext, null)
+            }
         }
     }
 }
@@ -438,10 +434,18 @@ private fun QuizCompletedStateExpressive(
         
         Spacer(modifier = Modifier.height(32.dp))
         
+        val performanceMessage = when {
+            score == total -> "Perfect! You've mastered this."
+            score >= total * 0.8 -> "Great job! Almost there."
+            score >= total * 0.5 -> "Good effort. Keep studying!"
+            else -> "Don't worry. Review the material and try again."
+        }
+
         Text(
-            text = "Quiz Complete",
+            text = performanceMessage,
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.ExtraBold
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center
         )
         
         Spacer(modifier = Modifier.height(12.dp))

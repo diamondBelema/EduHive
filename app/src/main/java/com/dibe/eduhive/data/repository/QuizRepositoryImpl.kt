@@ -14,7 +14,7 @@ import com.dibe.eduhive.domain.repository.QuizRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.util.UUID
-import jakarta.inject.Inject
+import javax.inject.Inject
 
 
 class QuizRepositoryImpl @Inject constructor(
@@ -58,14 +58,6 @@ class QuizRepositoryImpl @Inject constructor(
 
     /**
      * Generate quiz questions grounded in the concept's existing flashcards.
-     *
-     * Each flashcard's front+back pair is a distinct, already-verified fact.
-     * We feed these as numbered facts into the prompt so the model writes one
-     * question per fact rather than rephrasing the same one-sentence description
-     * five times.
-     *
-     * If no flashcards exist yet (e.g. quiz generated before flashcard generation),
-     * we fall back to the concept description with questionCount capped at 1.
      */
     fun generateQuizForConceptStreaming(
         conceptId: String,
@@ -75,16 +67,15 @@ class QuizRepositoryImpl @Inject constructor(
     ): Flow<QuizGenerationProgress> = flow {
         emit(QuizGenerationProgress.Loading)
 
-        // Fetch existing flashcards for this concept — zero extra AI calls
+        // Fetch existing flashcards for this concept
         val flashcards = flashcardLocalDataSource.getForConcept(conceptId)
 
-        // Build "Q: <front> | A: <back>" fact strings, capped at 3
+        // Build "Q: <front> | A: <back>" fact strings
         val facts = flashcards
-            .take(3)
             .map { "Q: ${it.front} | A: ${it.back}" }
 
-        // If no flashcards, don't ask for more questions than the description supports
-        val effectiveCount = if (facts.isEmpty()) 1 else facts.size
+        // Increase question count to be more comprehensive
+        val effectiveCount = if (facts.isEmpty()) 2 else (facts.size + 1).coerceAtMost(5)
 
         // Create quiz entity
         val quizId = UUID.randomUUID().toString()
@@ -106,7 +97,7 @@ class QuizRepositoryImpl @Inject constructor(
             questionCount = effectiveCount
         ).collect { state ->
             when (state) {
-                is QuizGenerationState.Loading    -> emit(QuizGenerationProgress.CreatingQuiz(quiz))
+                is QuizGenerationState.Loading    -> {}
                 is QuizGenerationState.Generating -> emit(QuizGenerationProgress.Generating(state.percent))
                 is QuizGenerationState.Success    -> generatedQuestions = state.questions
                 is QuizGenerationState.Error      -> {
@@ -160,11 +151,8 @@ class QuizRepositoryImpl @Inject constructor(
         generateQuizForConceptStreaming(
             conceptId, conceptName, conceptDescription, questionCount
         ).collect { progress ->
-            when (progress) {
-                is QuizGenerationProgress.Success -> {
-                    result = Pair(progress.quiz, progress.questions)
-                }
-                else -> { /* Ignore intermediate states */ }
+            if (progress is QuizGenerationProgress.Success) {
+                result = Pair(progress.quiz, progress.questions)
             }
         }
 
@@ -178,7 +166,7 @@ class QuizRepositoryImpl @Inject constructor(
 sealed class QuizGenerationProgress {
     object Loading : QuizGenerationProgress()
     data class CreatingQuiz(val quiz: Quiz) : QuizGenerationProgress()
-    data class Generating(val percent: Int) : QuizGenerationProgress() // NEW: Progress from AI
+    data class Generating(val percent: Int) : QuizGenerationProgress()
     data class Saving(val questionCount: Int) : QuizGenerationProgress()
     data class Success(val quiz: Quiz, val questions: List<QuizQuestion>) : QuizGenerationProgress()
     data class Error(val message: String) : QuizGenerationProgress()

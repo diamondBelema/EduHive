@@ -4,8 +4,6 @@ package com.dibe.eduhive.data.source.ai
  * Prompt templates for each generation task.
  *
  * Kept deliberately short — on-device models (135M–1B) have a 1280-token window.
- * Every token spent on persona text and verbose rules is a token stolen from the
- * model's output budget. Shorter prompts = faster generation = more output headroom.
  */
 object LLMPromptTemplates {
 
@@ -21,7 +19,7 @@ object LLMPromptTemplates {
         return """
 ${contextLine}Extract as many specific, testable concepts as you can find in the text below.
 Output only pairs of CONCEPT and DESCRIPTION lines. No other text.
-Each DESCRIPTION must be one complete sentence explaining what the concept means.
+Each DESCRIPTION must be one or more complete sentence explaining what the concept means.
 
 Text:
 $text
@@ -104,12 +102,16 @@ FRONT:""".trimIndent()
         }
 
         return """
-Write $count quiz questions about: $conceptName
+Write $count unique quiz questions about: $conceptName
 $factsBlock
 
-Use TRUE_FALSE for factual statements. Use MCQ when multiple answers are plausible.
-Each question must test a different aspect.
+Instructions:
+1. Use TRUE_FALSE or MCQ format.
+2. Avoid generic questions. Be very specific to the provided context.
+3. DO NOT repeat the examples below.
+4. Output only the generated questions.
 
+EXAMPLES:
 QUESTION 1
 TYPE: TRUE_FALSE
 TEXT: The French Revolution began in 1789.
@@ -126,6 +128,7 @@ OPTION C: Italy
 OPTION D: Spain
 CORRECT: B
 
+NOW GENERATE $count QUESTIONS FOR $conceptName:
 QUESTION 1
 TYPE:""".trimIndent()
     }
@@ -144,14 +147,18 @@ TYPE:""".trimIndent()
             """
 CHUNK ${chunk.index}
 MATERIAL: ${chunk.materialTitle}
-SOURCE_CHUNK_INDEX: ${chunk.chunkIndex}
 TEXT: ${chunk.text}
             """.trimIndent()
         }
 
         return """
-Answer the question using ONLY the provided chunks.
-If context is incomplete, give the best answer but state your uncertainty.
+You are an expert AI tutor. Answer the user's question using ONLY the provided context chunks.
+
+Rules:
+1. If the answer isn't in the chunks, state "I don't have enough specific information in your materials to answer this."
+2. Be highly specific. Quote or reference details from the text.
+3. Do not give general knowledge answers if they aren't supported by the chunks.
+4. Use a helpful, encouraging tone.
 
 Question:
 $question
@@ -159,7 +166,7 @@ $question
 Context Chunks:
 $chunkBlock
 
-ANSWER: <your response in 3-7 sentences>
+ANSWER: <detailed response using text evidence>
 CONFIDENCE: <HIGH|MEDIUM|LOW>
 CITATIONS: <comma-separated chunk numbers like 1,3; use NONE if no support>""".trimIndent()
     }
