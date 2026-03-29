@@ -481,11 +481,28 @@ class AIDataSource @Inject constructor(
     }
 
     private fun parseGroundedAnswer(response: String): GroundedAnswer {
+        // Prompt ends with "ANSWER:" so the model continues inline.
+        // The full response IS the answer — just clean it up.
+        // Still try to find structured fields if the model happened to include them.
+        val lines = response.trim().lines()
+
         val answerLine = response
             .lineSequence()
             .firstOrNull { it.trim().startsWith("ANSWER:", ignoreCase = true) }
             ?.substringAfter(":")
             ?.trim()
+
+        // If no structured ANSWER: line, the entire response is the answer
+        val answer = when {
+            !answerLine.isNullOrBlank() -> answerLine
+            response.isNotBlank() -> response.trim()
+                .lines()
+                .filterNot { it.trim().startsWith("CONFIDENCE:", ignoreCase = true) }
+                .filterNot { it.trim().startsWith("CITATIONS:", ignoreCase = true) }
+                .joinToString(" ")
+                .trim()
+            else -> ""
+        }
 
         val confidence = response
             .lineSequence()
@@ -494,7 +511,7 @@ class AIDataSource @Inject constructor(
             ?.trim()
             ?.uppercase()
             ?.takeIf { it in setOf("HIGH", "MEDIUM", "LOW") }
-            ?: "LOW"
+            ?: "MEDIUM"
 
         val citationLine = response
             .lineSequence()
@@ -513,9 +530,7 @@ class AIDataSource @Inject constructor(
         }
 
         return GroundedAnswer(
-            answer = answerLine
-                ?.takeIf { it.isNotBlank() }
-                ?: response.trim().lines().firstOrNull().orEmpty(),
+            answer = answer,
             confidence = confidence,
             citationIndexes = citationIndexes
         )

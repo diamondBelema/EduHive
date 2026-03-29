@@ -53,11 +53,12 @@ class AskHiveQuestionUseCase @Inject constructor(
 
             var runningChunkIndex = 0
             extractedPages.forEach { page ->
+                // Larger chunks to capture more context
                 textChunker
-                    .chunkText(text = page, maxTokens = 220, overlapTokens = 40)
+                    .chunkText(text = page, maxTokens = 150, overlapTokens = 30)
                     .forEach { chunk ->
                         val normalizedText = chunk.text.trim()
-                        if (normalizedText.length < 40) return@forEach
+                        if (normalizedText.length < 20) return@forEach
                         val score = lexicalScore(question, normalizedText)
                         rankedChunks += RankedChunk(
                             materialId = material.id,
@@ -78,6 +79,7 @@ class AskHiveQuestionUseCase @Inject constructor(
             )
         }
 
+        // Filter and sort chunks
         val topChunks = rankedChunks
             .sortedByDescending { it.score }
             .take(MAX_CONTEXT_CHUNKS)
@@ -130,19 +132,24 @@ class AskHiveQuestionUseCase @Inject constructor(
                 }
             }
             .ifEmpty {
-                topChunks.take(2).map { chunk ->
-                    DocumentChatCitation(
-                        materialId = chunk.materialId,
-                        materialTitle = chunk.materialTitle,
-                        chunkIndex = chunk.chunkIndex,
-                        snippet = chunk.text.take(180),
-                        localPath = chunk.localPath
-                    )
-                }
+                // If model failed to cite but we have high-score chunks, cite the best one
+                if (topChunks.first().score > MIN_CONFIDENT_SCORE) {
+                    listOf(DocumentChatCitation(
+                        materialId = topChunks.first().materialId,
+                        materialTitle = topChunks.first().materialTitle,
+                        chunkIndex = topChunks.first().chunkIndex,
+                        snippet = topChunks.first().text.take(180),
+                        localPath = topChunks.first().localPath
+                    ))
+                } else emptyList()
             }
 
+        // Lowered threshold and improved detection
         val strongestScore = topChunks.firstOrNull()?.score ?: 0.0
-        val weakGrounding = strongestScore < MIN_CONFIDENT_SCORE || mappedCitations.isEmpty()
+        val isAnswerRelevant = generated.answer.length > 20 &&
+                !generated.answer.contains("enough specific information", ignoreCase = true)
+
+        val weakGrounding = strongestScore < 0.1 || !isAnswerRelevant
 
         Result.success(
             DocumentChatAnswer(
@@ -169,17 +176,15 @@ class AskHiveQuestionUseCase @Inject constructor(
         val overlaps = queryTokens.count { it in textTokens }
         val overlapScore = overlaps.toDouble() / queryTokens.size
 
-        // Bonus for exact phrase match in the text
-        val phraseBonus = if (text.lowercase().contains(question.trim().lowercase())) 0.25 else 0.0
+        // Increased bonus for exact phrase match
+        val phraseBonus = if (text.lowercase().contains(question.trim().lowercase())) 0.5 else 0.0
 
-        // Bonus for specific/longer terms (> 6 chars) — these are more discriminating
         val specificTermBonus = queryTokens
-            .filter { it.length > 6 }
-            .count { it in textTokens } * 0.08
+            .filter { it.length > 5 } // Lowered to 5 chars
+            .count { it in textTokens } * 0.12
 
-        // Bonus when the text explicitly contains educational keywords from the question
         val educationalBonus = queryTokens
-            .count { it in EDUCATIONAL_KEYWORDS && it in textTokens } * 0.10
+            .count { it in EDUCATIONAL_KEYWORDS && it in textTokens } * 0.15
 
         return overlapScore + phraseBonus + specificTermBonus + educationalBonus
     }
@@ -189,33 +194,23 @@ class AskHiveQuestionUseCase @Inject constructor(
             .lowercase()
             .split(Regex("[^a-z0-9]+"))
             .map { it.trim() }
-            .filter { token -> token.length >= 3 && token !in STOP_WORDS }
+            .filter { token -> token.length >= 2 && token !in STOP_WORDS } // Lowered length to 2
             .toSet()
     }
 
     companion object {
-        /** Increased from 4 → 7 to provide richer context to the model. */
-        private const val MAX_CONTEXT_CHUNKS = 7
-        /** Increased from 420 → 600 to capture more of each retrieved passage. */
-        private const val MAX_CHARS_PER_CHUNK = 600
-        private const val MIN_CONFIDENT_SCORE = 0.18
+        // Budget: 1280 token window - 200 output - 80 template - 30 question = 970 tokens for context
+        // 3 chunks x ~300 chars (~75 tokens each) = ~225 tokens — fits safely with headroom
+        private const val MAX_CONTEXT_CHUNKS = 3
+        private const val MAX_CHARS_PER_CHUNK = 300
+        private const val MIN_CONFIDENT_SCORE = 0.10
 
-        /**
-         * Stop words deliberately exclude question/interrogative words (what, when, where, which)
-         * so that the lexical scorer can still match them against context chunks that
-         * contain definitions and explanatory sentences.
-         */
         private val STOP_WORDS = setOf(
             "the", "and", "for", "that", "this", "with", "from", "into", "about",
             "have", "has", "are", "was", "were", "your", "their",
             "will", "would", "could", "should", "than", "then", "been", "being", "can"
         )
 
-        /**
-         * Common educational/instructional terms that signal relevance.
-         * When a query token AND a chunk token both belong to this set, a small
-         * bonus is applied to the lexical score.
-         */
         private val EDUCATIONAL_KEYWORDS = setOf(
             "define", "defined", "definition", "explain", "explained", "explanation",
             "describe", "described", "description", "compare", "contrast",
@@ -247,4 +242,3 @@ data class DocumentChatCitation(
     val snippet: String,
     val localPath: String
 )
-

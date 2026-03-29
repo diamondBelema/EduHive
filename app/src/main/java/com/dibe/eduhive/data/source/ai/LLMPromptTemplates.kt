@@ -2,8 +2,6 @@ package com.dibe.eduhive.data.source.ai
 
 /**
  * Prompt templates for each generation task.
- *
- * Kept deliberately short — on-device models (135M–1B) have a 1280-token window.
  */
 object LLMPromptTemplates {
 
@@ -144,30 +142,17 @@ TYPE:""".trimIndent()
 
     fun groundedChat(question: String, contextChunks: List<GroundedContextChunk>): String {
         val chunkBlock = contextChunks.joinToString("\n\n") { chunk ->
-            """
-CHUNK ${chunk.index}
-MATERIAL: ${chunk.materialTitle}
-TEXT: ${chunk.text}
-            """.trimIndent()
+            "[${'$'}{chunk.index}] ${chunk.text}"
         }
 
         return """
-You are an expert AI tutor. Answer the user's question using ONLY the provided context chunks.
+Answer this question using ONLY the text below.
+If the answer is in the text, give it directly. If not, say so.
 
-Rules:
-1. If the answer isn't in the chunks, state "I don't have enough specific information in your materials to answer this."
-2. Be highly specific. Quote or reference details from the text.
-3. Do not give general knowledge answers if they aren't supported by the chunks.
-4. Use a helpful, encouraging tone.
-
-Question:
-$question
-
-Context Chunks:
 $chunkBlock
 
-ANSWER: <detailed response using text evidence>
-CONFIDENCE: <HIGH|MEDIUM|LOW>
-CITATIONS: <comma-separated chunk numbers like 1,3; use NONE if no support>""".trimIndent()
+Question: $question
+
+ANSWER:""".trimIndent()
     }
 }
