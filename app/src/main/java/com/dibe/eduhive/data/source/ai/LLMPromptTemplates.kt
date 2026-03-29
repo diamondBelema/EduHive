@@ -19,61 +19,40 @@ object LLMPromptTemplates {
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-Extract 5-10 specific study concepts from the text.
-Do not output blank lines. Do not output markdown.
-Each concept must be unique and testable.
-Each description must be 8-16 words.
+${contextLine}Extract as many specific, testable concepts as you can find in the text below.
+Output only pairs of CONCEPT and DESCRIPTION lines. No other text.
+Each DESCRIPTION must be one complete sentence explaining what the concept means.
 
-OUTPUT RULES:
-1) Start with OUTPUT_START on its own line.
-2) Then only repeated pairs:
-CONCEPT: <name>
-DESCRIPTION: <description>
-3) End with OUTPUT_END on its own line.
-4) If nothing is found, return exactly:
-OUTPUT_START
-NO_CONCEPTS
-OUTPUT_END
-
-${contextLine}Text:
+Text:
 $text
 
-OUTPUT_START
+Output:
 CONCEPT: Muscle hypertrophy
-DESCRIPTION: Increase in muscle fiber size due to progressive resistance loading.
-
+DESCRIPTION: Increase in muscle fiber size caused by progressive resistance training over time.
 CONCEPT: Osmosis
-DESCRIPTION: Passive movement of water across a selectively permeable membrane gradient.
-
-OUTPUT_END
-
-Now produce only the output block:
-OUTPUT_START
-CONCEPT:
-DESCRIPTION:
-OUTPUT_END
-""".trimIndent()
+DESCRIPTION: Passive diffusion of water molecules across a selectively permeable membrane down a concentration gradient.
+CONCEPT:""".trimIndent()
     }
+
 
     // ── Flashcard generation ──────────────────────────────────────────────────
 
     fun flashcardDraft(conceptName: String, conceptDescription: String, count: Int): String {
         return """
-Create $count flashcards for: $conceptName
-Context: $conceptDescription
+Create $count flashcards for the concept: $conceptName
+Definition: $conceptDescription
 
-Rules:
-- Use only this format:
-FRONT: <question>
-BACK: <answer>
-- FRONT must be a complete question mentioning "$conceptName" or a clear scenario.
-- Avoid one-word or generic fronts (Definition, Application, Mechanism, etc.).
-- BACK must be a concise standalone answer (1-2 sentences).
-- Do not repeat stems like "What is" across all cards.
+Output only FRONT and BACK pairs. No other text.
+FRONT must be a specific question about $conceptName.
+BACK must be a real, complete answer — not a placeholder.
 
-FRONT: How does $conceptName break down under extreme conditions?
-BACK: [concise explanation of the failure mode or edge case]
+CONCEPT: Osmosis
+FRONT: Why does a cell placed in a hypertonic solution shrink?
+BACK: Water moves out of the cell by osmosis because the external solution has a higher solute concentration, creating a concentration gradient.
+FRONT: What happens when osmosis is disrupted by a damaged membrane?
+BACK: The cell loses the ability to regulate water balance, causing it to either swell and burst or shrink depending on the environment.
 
+CONCEPT: $conceptName
 FRONT:""".trimIndent()
     }
 

@@ -36,14 +36,14 @@ class AIDataSource @Inject constructor(
         const val BATCH_SIZE = 3
 
         // ── Per-task input character limits ───────────────────────────────
-        // MAX_INPUT_CHARS_CONCEPTS = 1200:
+        // MAX_INPUT_CHARS_CONCEPTS = 800:
         // Token budget: 1280 total window
-        //   prompt template overhead: ~80 tokens (~320 chars)
-        //   input text ceiling:       ~300 tokens (~1200 chars)
-        //   output headroom:          ~900 tokens — plenty for 5-10 concept pairs
-        // Previously raised to 2400 which caused "Reached max sequence length" crashes
-        // because dense text + prompt overhead exceeded the 1280-token window.
-        private const val MAX_INPUT_CHARS_CONCEPTS   = 1200
+        //   prompt overhead (template + examples): ~200 tokens (~800 chars)
+        //   input text: ~200 tokens (~800 chars)
+        //   output headroom: ~880 tokens — enough for 10+ concept pairs at ~20 tok each
+        // Kept at 800 to reliably stay under the window even on dense academic text.
+        // Each batch of 800 chars = roughly 1 PDF page after cleaning.
+        private const val MAX_INPUT_CHARS_CONCEPTS   = 800
         private const val MAX_INPUT_CHARS_FLASHCARDS = 800
         private const val MAX_INPUT_CHARS_QUIZ       = 800
 
@@ -449,23 +449,29 @@ class AIDataSource @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun stripPromptEcho(response: String): String {
+        // Strategy 1: OUTPUT_START/END delimiters (old prompt format)
         val blockStart = response.indexOf("OUTPUT_START")
         val blockEnd = response.indexOf("OUTPUT_END")
         if (blockStart != -1 && blockEnd > blockStart) {
             return response.substring(blockStart + "OUTPUT_START".length, blockEnd).trim()
         }
 
+        // Strategy 2: find the last known example DESCRIPTION line and take everything after
+        // This strips any prompt echo when the model repeats our example before generating
         val echoMarkers = listOf(
+            "DESCRIPTION: Passive diffusion of water molecules across a selectively permeable membrane down a concentration gradient.",
+            "DESCRIPTION: Increase in muscle fiber size caused by progressive resistance training over time.",
             "DESCRIPTION: A short definition of a key idea found in the provided text.",
             "DESCRIPTION: Another distinct idea from the provided text, not a repeat.",
             "Output format:",
-            "Extract up to 10 specific concepts"
+            "Extract up to 10 specific concepts",
+            "Output:"
         )
         for (marker in echoMarkers) {
             val idx = response.lastIndexOf(marker)
             if (idx != -1) {
-                val afterMarker = response.substring(idx)
-                val nextConcept = afterMarker.indexOf("\nCONCEPT:")
+                val afterMarker = response.substring(idx + marker.length)
+                val nextConcept = afterMarker.indexOf("CONCEPT:")
                 if (nextConcept != -1) {
                     return afterMarker.substring(nextConcept).trim()
                 }
@@ -588,7 +594,16 @@ class AIDataSource @Inject constructor(
                     val back = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
-                    if (currentFront!!.isNotBlank() && back.length > 4) {
+                    // Skip if back is a bracket placeholder the model echoed literally
+                    val isPlaceholder = back.startsWith("[") || back.endsWith("]") ||
+                            back.lowercase().startsWith("brief ") ||
+                            back.lowercase().startsWith("concise ") ||
+                            back.lowercase().contains("explanation of the") ||
+                            back.lowercase().contains("description of the") ||
+                            back.lowercase().contains("mission statement") ||
+                            back.lowercase().startsWith("a brief") ||
+                            back.lowercase().startsWith("an explanation")
+                    if (currentFront!!.isNotBlank() && back.length > 10 && !isPlaceholder) {
                         flashcards.add(GeneratedFlashcard(currentFront!!, back))
                     }
                     currentFront = null

@@ -60,6 +60,11 @@ android {
 
 }
 
+ksp {
+    arg("dagger.fastInit", "enabled")
+    arg("dagger.hilt.disableModulesHaveInstallInCheck", "true")
+}
+
 dependencies {
 
 //    Kotlin coroutines (needed for SDK's Flow / suspend APIs)
