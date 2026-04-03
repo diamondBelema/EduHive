@@ -49,7 +49,7 @@ class QuizGenerationWorker @AssistedInject constructor(
                     conceptId = conceptId,
                     conceptName = concept.name,
                     conceptDescription = concept.description,
-                    questionCount = 3
+                    questionCount = 5
                 )
 
                 completed++
