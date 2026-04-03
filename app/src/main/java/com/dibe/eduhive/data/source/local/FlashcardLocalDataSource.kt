@@ -29,6 +29,9 @@ class FlashcardLocalDataSource @Inject constructor(
     suspend fun getAllForHiveStudy(hiveId: String) =
         flashcardDao.getAllForHiveStudy(hiveId)
 
+    suspend fun getAllForStudy() =
+        flashcardDao.getAllForStudy()
+
     suspend fun updateLeitner(id: String, box: Int, time: Long) =
         flashcardDao.updateLeitner(id, box, time)
 

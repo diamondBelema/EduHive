@@ -34,6 +34,10 @@ class ConceptRepositoryImpl @Inject constructor(
         return localDataSource.getForHive(hiveId).map { it.toDomain() }
     }
 
+    override suspend fun getAllConcepts(): List<Concept> {
+        return localDataSource.getAll().map { it.toDomain() }
+    }
+
     override suspend fun getConceptById(conceptId: String): Concept? {
         return localDataSource.getById(conceptId)?.toDomain()
     }

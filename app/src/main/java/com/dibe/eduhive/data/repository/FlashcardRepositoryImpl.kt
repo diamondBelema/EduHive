@@ -45,6 +45,12 @@ class FlashcardRepositoryImpl @Inject constructor(
             .map { it.toDomain() }
     }
 
+    override suspend fun getAllFlashcardsForStudy(limit: Int): List<Flashcard> {
+        return localDataSource.getAllForStudy()
+            .take(limit)
+            .map { it.toDomain() }
+    }
+
     override suspend fun updateLeitnerBox(
         flashcardId: String,
         newBox: Int,

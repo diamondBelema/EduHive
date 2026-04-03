@@ -1,8 +1,11 @@
 package com.dibe.eduhive.workers
 
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.dibe.eduhive.domain.repository.ConceptRepository
@@ -28,22 +31,53 @@ class FlashcardGenerationWorker @AssistedInject constructor(
             ?: return Result.failure(workDataOf(KEY_ERROR to "Missing hiveId"))
 
         val total = conceptIds.size
+
+        // Promote to foreground service so the OS keeps this alive when the app is backgrounded
+        // and the background-app indicator appears in the status bar.
+        val startNotification = NotificationHelper.getBaseNotification(
+            context, "Generating Flashcards", "Starting ($total concepts)..."
+        ).setProgress(total, 0, true).build()
+        try {
+            val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ForegroundInfo(
+                    NotificationHelper.NOTIFICATION_ID,
+                    startNotification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                ForegroundInfo(NotificationHelper.NOTIFICATION_ID, startNotification)
+            }
+            setForeground(foregroundInfo)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "setForeground failed: ${e.message}")
+        }
+
         setProgress(
             workDataOf(
                 KEY_HIVE_ID to hiveId,
                 KEY_COMPLETED to 0,
                 KEY_TOTAL to total,
-                KEY_STATUS to "Queued..."
+                KEY_CURRENT_CONCEPT_NAME to "",
+                KEY_STATUS to "Starting..."
             )
         )
-        postNotification(0, total)
 
         return try {
             var completed = 0
             for (conceptId in conceptIds) {
+                if (isStopped) return Result.failure(workDataOf(KEY_ERROR to "Cancelled"))
                 val concept = conceptRepository.getConceptById(conceptId) ?: continue
 
                 postNotification(completed, total, concept.name)
+                setProgress(
+                    workDataOf(
+                        KEY_HIVE_ID to hiveId,
+                        KEY_COMPLETED to completed,
+                        KEY_TOTAL to total,
+                        KEY_CURRENT_CONCEPT_NAME to concept.name,
+                        KEY_STATUS to "Generating flashcards for ${concept.name}..."
+                    )
+                )
 
                 flashcardRepository.generateFlashcardsForConcept(
                     conceptId = conceptId,
@@ -58,7 +92,8 @@ class FlashcardGenerationWorker @AssistedInject constructor(
                         KEY_HIVE_ID to hiveId,
                         KEY_COMPLETED to completed,
                         KEY_TOTAL to total,
-                        KEY_STATUS to "Generating flashcards..."
+                        KEY_CURRENT_CONCEPT_NAME to concept.name,
+                        KEY_STATUS to "Flashcards ready ($completed/$total)"
                     )
                 )
             }
@@ -83,7 +118,7 @@ class FlashcardGenerationWorker @AssistedInject constructor(
         }
         val notification = NotificationHelper.getBaseNotification(
             context,
-            "Study Hive: Flashcard Generation",
+            "EduHive: Flashcard Generation",
             content
         ).setProgress(total, completed, completed == 0 && total == 0).build()
         notificationManager.notify(NotificationHelper.NOTIFICATION_ID, notification)
@@ -94,10 +129,12 @@ class FlashcardGenerationWorker @AssistedInject constructor(
     }
 
     companion object {
+        private const val TAG = "FlashcardWorker"
         const val KEY_CONCEPT_IDS = "conceptIds"
         const val KEY_HIVE_ID = "hiveId"
         const val KEY_COMPLETED = "completed"
         const val KEY_TOTAL = "total"
+        const val KEY_CURRENT_CONCEPT_NAME = "currentConceptName"
         const val KEY_ERROR = "error"
         const val KEY_STATUS = "status"
         const val STATUS_COMPLETE = "FLASHCARDS_COMPLETE"

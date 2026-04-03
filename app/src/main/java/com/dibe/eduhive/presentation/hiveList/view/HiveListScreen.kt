@@ -3,14 +3,15 @@ package com.dibe.eduhive.presentation.hiveList.view
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material3.*
@@ -30,7 +31,10 @@ import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListViewModel
 @Composable
 fun HiveListScreen(
     viewModel: HiveListViewModel = hiltViewModel(),
-    onHiveSelected: (String) -> Unit
+    onHiveSelected: (String) -> Unit,
+    onStudyAll: () -> Unit = {},
+    onQuizAll: () -> Unit = {},
+    onChatAll: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -103,10 +107,35 @@ fun HiveListScreen(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(onClick = onStudyAll, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Study All")
+                                }
+                                OutlinedButton(onClick = onQuizAll, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.Quiz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Quiz All")
+                                }
+                                OutlinedButton(onClick = onChatAll, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Chat All")
+                                }
+                            }
+                        }
                         items(state.hives, key = { it.id }) { hive ->
                             HiveCardExpressive(
                                 hive = hive,
-                                onClick = { viewModel.onEvent(HiveListEvent.SelectHive(hive.id)) }
+                                onClick = { viewModel.onEvent(HiveListEvent.SelectHive(hive.id)) },
+                                onEdit = { viewModel.onEvent(HiveListEvent.ShowEditDialog(hive)) },
+                                onArchive = { viewModel.onEvent(HiveListEvent.ArchiveHive(hive.id)) },
+                                onDelete = { viewModel.onEvent(HiveListEvent.ShowDeleteConfirm(hive)) }
                             )
                         }
                     }
@@ -142,18 +171,45 @@ fun HiveListScreen(
                 }
             )
         }
+
+        state.hiveToEdit?.let { hive ->
+            EditHiveBottomSheet(
+                hive = hive,
+                onDismiss = { viewModel.onEvent(HiveListEvent.HideEditDialog) },
+                onSave = { name, description ->
+                    viewModel.onEvent(HiveListEvent.EditHive(hive.id, name, description))
+                }
+            )
+        }
+
+        state.hiveToDelete?.let { hive ->
+            DeleteHiveDialog(
+                hive = hive,
+                onDismiss = { viewModel.onEvent(HiveListEvent.HideDeleteConfirm) },
+                onConfirm = { viewModel.onEvent(HiveListEvent.DeleteHive(hive.id)) }
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HiveCardExpressive(
     hive: Hive,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onEdit: () -> Unit = {},
+    onArchive: () -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
+    var showContextMenu by remember { mutableStateOf(false) }
+
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { showContextMenu = true }
+            ),
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -188,16 +244,64 @@ fun HiveCardExpressive(
                     }
                 }
                 
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Icon(
-                        Icons.Rounded.School,
-                        contentDescription = null,
-                        modifier = Modifier.padding(8.dp).size(24.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(
+                            Icons.Rounded.School,
+                            contentDescription = null,
+                            modifier = Modifier.padding(8.dp).size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                    // Three-dot menu button
+                    Box {
+                        IconButton(onClick = { showContextMenu = true }) {
+                            Icon(
+                                Icons.Rounded.MoreVert,
+                                contentDescription = "More options",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showContextMenu,
+                            onDismissRequest = { showContextMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit") },
+                                leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                                onClick = {
+                                    showContextMenu = false
+                                    onEdit()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Archive") },
+                                leadingIcon = { Icon(Icons.Rounded.Archive, contentDescription = null) },
+                                onClick = {
+                                    showContextMenu = false
+                                    onArchive()
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Delete,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick = {
+                                    showContextMenu = false
+                                    onDelete()
+                                }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -337,6 +441,116 @@ fun CreateHiveBottomSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditHiveBottomSheet(
+    hive: Hive,
+    onDismiss: () -> Unit,
+    onSave: (String, String?) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    var name by remember(hive.id) { mutableStateOf(hive.name) }
+    var description by remember(hive.id) { mutableStateOf(hive.description ?: "") }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.extraLarge
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp, bottom = 48.dp, top = 8.dp)
+        ) {
+            Text(
+                "Edit Hive",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Hive Name") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = { Text("Goal or Description") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                minLines = 3
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onSave(name, description.ifBlank { null })
+                        onDismiss()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                enabled = name.isNotBlank(),
+                shape = MaterialTheme.shapes.large
+            ) {
+                Text("Save Changes", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+    }
+}
+
+@Composable
+fun DeleteHiveDialog(
+    hive: Hive,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                Icons.Rounded.Delete,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error
+            )
+        },
+        title = { Text("Delete \"${hive.name}\"?") },
+        text = {
+            Text(
+                "This will permanently delete the hive and ALL its concepts, flashcards, and quizzes. This cannot be undone.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(); onDismiss() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                )
+            ) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 fun formatLastAccessed(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - timestamp
@@ -348,3 +562,4 @@ fun formatLastAccessed(timestamp: Long): String {
         else -> "${diff / 86400_000}d ago"
     }
 }
+

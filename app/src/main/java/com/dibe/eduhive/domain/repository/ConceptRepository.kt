@@ -15,6 +15,8 @@ interface ConceptRepository {
 
     suspend fun getConceptsForHive(hiveId: String): List<Concept>
 
+    suspend fun getAllConcepts(): List<Concept>
+
     suspend fun getConceptById(conceptId: String): Concept?
 
     suspend fun getWeakestConcepts(hiveId: String, limit: Int = 5): List<Concept>

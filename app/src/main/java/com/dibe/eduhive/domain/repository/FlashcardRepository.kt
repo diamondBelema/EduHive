@@ -33,6 +33,8 @@ interface FlashcardRepository {
         limit: Int = 20
     ): List<Flashcard>
 
+    suspend fun getAllFlashcardsForStudy(limit: Int = 100): List<Flashcard>
+
     /**
      * Update flashcard's Leitner box and schedule.
      * Called after each review.

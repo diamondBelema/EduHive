@@ -12,7 +12,7 @@ class GetNextReviewItemsUseCase @Inject constructor(
     private val flashcardRepository: FlashcardRepository
 ) {
     suspend operator fun invoke(
-        hiveId: String,
+        hiveId: String?,
         limit: Int = 20,
         includeNewCards: Boolean = true,
         allowContinueWhenNoDue: Boolean = false
@@ -27,7 +27,11 @@ class GetNextReviewItemsUseCase @Inject constructor(
             )
 
             val cards = if (dueCards.isEmpty() && allowContinueWhenNoDue) {
-                flashcardRepository.getStudyFallbackFlashcards(hiveId = hiveId, limit = limit)
+                if (hiveId.isNullOrBlank()) {
+                    flashcardRepository.getAllFlashcardsForStudy(limit = limit)
+                } else {
+                    flashcardRepository.getStudyFallbackFlashcards(hiveId = hiveId, limit = limit)
+                }
             } else {
                 dueCards
             }

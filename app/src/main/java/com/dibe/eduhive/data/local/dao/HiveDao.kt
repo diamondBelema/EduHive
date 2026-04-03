@@ -12,8 +12,11 @@ interface HiveDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(hive: HiveEntity)
 
-    @Query("SELECT * FROM hives ORDER BY lastAccessedAt DESC")
+    @Query("SELECT * FROM hives WHERE isArchived = 0 ORDER BY lastAccessedAt DESC")
     suspend fun getAll(): List<HiveEntity>
+
+    @Query("SELECT * FROM hives WHERE isArchived = 1 ORDER BY lastAccessedAt DESC")
+    suspend fun getArchived(): List<HiveEntity>
 
     @Query("DELETE FROM hives WHERE hiveId = :id")
     suspend fun delete(id: String)
@@ -23,4 +26,10 @@ interface HiveDao {
 
     @Query("UPDATE hives SET lastAccessedAt = :time WHERE hiveId = :id")
     suspend fun updateLastAccessed(id: String, time: Long)
+
+    @Query("UPDATE hives SET name = :name, description = :description WHERE hiveId = :id")
+    suspend fun updateNameAndDescription(id: String, name: String, description: String?)
+
+    @Query("UPDATE hives SET isArchived = :archived WHERE hiveId = :id")
+    suspend fun setArchived(id: String, archived: Boolean)
 }

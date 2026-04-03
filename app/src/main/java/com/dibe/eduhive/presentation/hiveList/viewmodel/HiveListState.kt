@@ -9,6 +9,8 @@ data class HiveListState(
     val isLoading: Boolean = false,
     val showCreateDialog: Boolean = false,
     val selectedHiveId: String? = null,
+    val hiveToEdit: Hive? = null,
+    val hiveToDelete: Hive? = null,
     val error: String? = null
 )
 
