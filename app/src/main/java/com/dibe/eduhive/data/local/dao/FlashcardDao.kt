@@ -59,4 +59,7 @@ interface FlashcardDao {
 
     @Query("DELETE FROM flashcards WHERE conceptId = :conceptId")
     suspend fun deleteAllForConcept(conceptId: String)
+
+    @Query("SELECT * FROM flashcards ORDER BY lastSeenAt ASC, leitnerBox ASC")
+    suspend fun getAllForStudy(): List<FlashcardEntity>
 }

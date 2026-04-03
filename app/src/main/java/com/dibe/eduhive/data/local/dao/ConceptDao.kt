@@ -36,4 +36,7 @@ interface ConceptDao {
 
     @Query("DELETE FROM concepts WHERE conceptId = :conceptId")
     suspend fun deleteById(conceptId: String)
+
+    @Query("SELECT * FROM concepts")
+    suspend fun getAll(): List<ConceptEntity>
 }
