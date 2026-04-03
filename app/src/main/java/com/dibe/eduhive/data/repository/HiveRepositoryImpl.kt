@@ -4,7 +4,7 @@ import com.dibe.eduhive.data.local.entity.HiveEntity
 import com.dibe.eduhive.data.source.local.HiveLocalDataSource
 import com.dibe.eduhive.domain.model.Hive
 import com.dibe.eduhive.domain.repository.HiveRepository
-import jakarta.inject.Inject
+import javax.inject.Inject
 
 
 class HiveRepositoryImpl @Inject constructor(
@@ -31,8 +31,8 @@ class HiveRepositoryImpl @Inject constructor(
         localDataSource.updateLastAccessed(hiveId, timestamp)
     }
 
-    override suspend fun updateHive(hiveId: String, name: String, description: String?) {
-        localDataSource.updateNameAndDescription(hiveId, name, description)
+    override suspend fun updateHive(hiveId: String, name: String, description: String?, iconName: String) {
+        localDataSource.updateHiveDetails(hiveId, name, description, iconName)
     }
 
     override suspend fun archiveHive(hiveId: String) {

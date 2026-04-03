@@ -27,8 +27,8 @@ interface HiveDao {
     @Query("UPDATE hives SET lastAccessedAt = :time WHERE hiveId = :id")
     suspend fun updateLastAccessed(id: String, time: Long)
 
-    @Query("UPDATE hives SET name = :name, description = :description WHERE hiveId = :id")
-    suspend fun updateNameAndDescription(id: String, name: String, description: String?)
+    @Query("UPDATE hives SET name = :name, description = :description, iconName = :iconName WHERE hiveId = :id")
+    suspend fun updateHiveDetails(id: String, name: String, description: String?, iconName: String)
 
     @Query("UPDATE hives SET isArchived = :archived WHERE hiveId = :id")
     suspend fun setArchived(id: String, archived: Boolean)

@@ -2,6 +2,7 @@ package com.dibe.eduhive.presentation.hiveList.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.dibe.eduhive.data.session.ActiveHiveStore
 import com.dibe.eduhive.domain.usecase.hive.ArchiveHiveUseCase
 import com.dibe.eduhive.domain.usecase.hive.CreateHiveUseCase
 import com.dibe.eduhive.domain.usecase.hive.DeleteHiveUseCase
@@ -25,7 +26,8 @@ class HiveListViewModel @Inject constructor(
     private val editHiveUseCase: EditHiveUseCase,
     private val deleteHiveUseCase: DeleteHiveUseCase,
     private val archiveHiveUseCase: ArchiveHiveUseCase,
-    private val getArchivedHivesUseCase: GetArchivedHivesUseCase
+    private val getArchivedHivesUseCase: GetArchivedHivesUseCase,
+    private val activeHiveStore: ActiveHiveStore
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HiveListState())
@@ -38,14 +40,14 @@ class HiveListViewModel @Inject constructor(
     fun onEvent(event: HiveListEvent) {
         when (event) {
             is HiveListEvent.LoadHives -> loadHives()
-            is HiveListEvent.CreateHive -> createHive(event.name, event.description)
+            is HiveListEvent.CreateHive -> createHive(event.name, event.description, event.iconName)
             is HiveListEvent.SelectHive -> selectHive(event.hiveId)
             is HiveListEvent.ClearSelectedHive -> _state.update { it.copy(selectedHiveId = null) }
             is HiveListEvent.ShowCreateDialog -> _state.update { it.copy(showCreateDialog = true) }
             is HiveListEvent.HideCreateDialog -> _state.update { it.copy(showCreateDialog = false) }
             is HiveListEvent.ShowEditDialog -> _state.update { it.copy(hiveToEdit = event.hive) }
             is HiveListEvent.HideEditDialog -> _state.update { it.copy(hiveToEdit = null) }
-            is HiveListEvent.EditHive -> editHive(event.hiveId, event.name, event.description)
+            is HiveListEvent.EditHive -> editHive(event.hiveId, event.name, event.description, event.iconName)
             is HiveListEvent.ShowDeleteConfirm -> _state.update { it.copy(hiveToDelete = event.hive) }
             is HiveListEvent.HideDeleteConfirm -> _state.update { it.copy(hiveToDelete = null) }
             is HiveListEvent.DeleteHive -> deleteHive(event.hiveId)
@@ -90,10 +92,10 @@ class HiveListViewModel @Inject constructor(
         }
     }
 
-    private fun createHive(name: String, description: String?) {
+    private fun createHive(name: String, description: String?, iconName: String) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
-            createHiveUseCase(name, description).fold(
+            createHiveUseCase(name, description, iconName).fold(
                 onSuccess = {
                     _state.update { it.copy(showCreateDialog = false, isLoading = false) }
                     loadHives()
@@ -108,7 +110,10 @@ class HiveListViewModel @Inject constructor(
     private fun selectHive(hiveId: String) {
         viewModelScope.launch {
             selectHiveUseCase(hiveId).fold(
-                onSuccess = { _state.update { it.copy(selectedHiveId = hiveId) } },
+                onSuccess = {
+                    activeHiveStore.setActiveHiveId(hiveId)
+                    _state.update { it.copy(selectedHiveId = hiveId) }
+                },
                 onFailure = { error ->
                     _state.update { it.copy(error = error.message ?: "Failed to select hive") }
                 }
@@ -116,9 +121,9 @@ class HiveListViewModel @Inject constructor(
         }
     }
 
-    private fun editHive(hiveId: String, name: String, description: String?) {
+    private fun editHive(hiveId: String, name: String, description: String?, iconName: String) {
         viewModelScope.launch {
-            editHiveUseCase(hiveId, name, description).fold(
+            editHiveUseCase(hiveId, name, description, iconName).fold(
                 onSuccess = {
                     _state.update { it.copy(hiveToEdit = null) }
                     loadHives()
@@ -169,4 +174,3 @@ class HiveListViewModel @Inject constructor(
         }
     }
 }
-

@@ -9,11 +9,14 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
@@ -27,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,6 +40,21 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Hive
 import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListEvent
 import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListViewModel
+
+private val HIVE_ICONS = mapOf(
+    "School" to Icons.Rounded.School,
+    "Book" to Icons.Rounded.MenuBook,
+    "Science" to Icons.Rounded.Science,
+    "Math" to Icons.Rounded.Calculate,
+    "History" to Icons.Rounded.History,
+    "Language" to Icons.Rounded.Language,
+    "Brain" to Icons.Rounded.Psychology,
+    "Art" to Icons.Rounded.Palette,
+    "Tech" to Icons.Rounded.Computer,
+    "Business" to Icons.Rounded.BusinessCenter
+)
+
+fun getHiveIcon(name: String): ImageVector = HIVE_ICONS[name] ?: Icons.Rounded.School
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -100,13 +119,13 @@ fun HiveListScreen(
                         }
                     }
                     
-                    // Expressive Persistent Search Widget
+                    // Expressive Persistent Search Widget - Shorter and more rounded
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 12.dp)
-                            .height(64.dp),
-                        shape = RoundedCornerShape(24.dp),
+                            .height(48.dp), // Shorter
+                        shape = CircleShape, // Fully rounded
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp, 
@@ -116,21 +135,21 @@ fun HiveListScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(horizontal = 20.dp),
+                                .padding(horizontal = 16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 Icons.Default.Search,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(12.dp))
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                                 if (state.searchQuery.isEmpty()) {
                                     Text(
                                         "Search your hives...",
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                     )
                                 }
@@ -138,7 +157,7 @@ fun HiveListScreen(
                                     value = state.searchQuery,
                                     onValueChange = { viewModel.onEvent(HiveListEvent.UpdateSearch(it)) },
                                     modifier = Modifier.fillMaxWidth(),
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
                                         color = MaterialTheme.colorScheme.onSurface
                                     ),
                                     singleLine = true
@@ -147,12 +166,12 @@ fun HiveListScreen(
                             if (state.searchQuery.isNotEmpty()) {
                                 IconButton(
                                     onClick = { viewModel.onEvent(HiveListEvent.UpdateSearch("")) },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(28.dp)
                                 ) {
                                     Icon(
                                         Icons.Rounded.Close,
                                         null,
-                                        modifier = Modifier.size(20.dp),
+                                        modifier = Modifier.size(18.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -172,9 +191,7 @@ fun HiveListScreen(
                 }
 
                 state.hives.isEmpty() -> {
-                    EmptyHivesState(
-                        onCreateClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) }
-                    )
+                    EmptyHivesState()
                 }
 
                 displayHives.isEmpty() && state.searchQuery.isNotBlank() -> {
@@ -218,12 +235,12 @@ fun HiveListScreen(
         )
     }
 
-    // Sheets & Dialogs (unchanged logic, just ensuring consistency)
+    // Sheets & Dialogs
     if (state.showCreateDialog) {
         CreateHiveBottomSheet(
             onDismiss = { viewModel.onEvent(HiveListEvent.HideCreateDialog) },
-            onCreate = { name, description ->
-                viewModel.onEvent(HiveListEvent.CreateHive(name, description))
+            onCreate = { name, description, icon ->
+                viewModel.onEvent(HiveListEvent.CreateHive(name, description, icon))
             }
         )
     }
@@ -232,8 +249,8 @@ fun HiveListScreen(
         EditHiveBottomSheet(
             hive = hive,
             onDismiss = { viewModel.onEvent(HiveListEvent.HideEditDialog) },
-            onSave = { name, description ->
-                viewModel.onEvent(HiveListEvent.EditHive(hive.id, name, description))
+            onSave = { name, description, icon ->
+                viewModel.onEvent(HiveListEvent.EditHive(hive.id, name, description, icon))
             }
         )
     }
@@ -302,7 +319,7 @@ fun HiveCardExpressive(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Rounded.AutoAwesome, 
+                            getHiveIcon(hive.iconName), 
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(28.dp)
@@ -387,6 +404,41 @@ fun HiveCardExpressive(
 }
 
 @Composable
+fun IconPickerRow(
+    selectedIcon: String,
+    onIconSelected: (String) -> Unit
+) {
+    Column {
+        Text(
+            "Choose Hive Identity",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(12.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) {
+            items(HIVE_ICONS.keys.toList()) { iconName ->
+                val isSelected = selectedIcon == iconName
+                Surface(
+                    onClick = { onIconSelected(iconName) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                        Icon(getHiveIcon(iconName), contentDescription = iconName, modifier = Modifier.size(28.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun NoSearchResults(query: String) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
@@ -424,7 +476,7 @@ fun NoSearchResults(query: String) {
 }
 
 @Composable
-fun EmptyHivesState(onCreateClick: () -> Unit) {
+fun EmptyHivesState() {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -458,25 +510,12 @@ fun EmptyHivesState(onCreateClick: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         
         Text(
-            "Create your first Knowledge Hive to start processing your materials into structured intelligence.",
+            "Create your first Knowledge Hive using the button below to start processing your materials into structured intelligence.",
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             lineHeight = 26.sp
         )
-        
-        Spacer(Modifier.height(56.dp))
-        
-        Button(
-            onClick = onCreateClick,
-            modifier = Modifier.fillMaxWidth().height(72.dp),
-            shape = RoundedCornerShape(24.dp),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-        ) {
-            Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp))
-            Spacer(Modifier.width(12.dp))
-            Text("Initialize Hive", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-        }
     }
 }
 
@@ -553,20 +592,23 @@ fun ArchivedHivesSheet(
 @Composable
 fun CreateHiveBottomSheet(
     onDismiss: () -> Unit,
-    onCreate: (String, String?) -> Unit
+    onCreate: (String, String?, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var iconName by remember { mutableStateOf("School") }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+        contentWindowInsets = { BottomSheetDefaults.windowInsets }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 32.dp)
                 .padding(bottom = 64.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Text(
                 "Initialize New Hive",
@@ -581,7 +623,11 @@ fun CreateHiveBottomSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(32.dp))
+            
+            IconPickerRow(selectedIcon = iconName, onIconSelected = { iconName = it })
+
+            Spacer(Modifier.height(32.dp))
 
             OutlinedTextField(
                 value = name,
@@ -606,7 +652,10 @@ fun CreateHiveBottomSheet(
             Spacer(Modifier.height(48.dp))
 
             Button(
-                onClick = { onCreate(name, description.ifBlank { null }) },
+                onClick = { 
+                    onCreate(name, description.ifBlank { null }, iconName)
+                    onDismiss()
+                },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(72.dp),
                 shape = RoundedCornerShape(24.dp)
@@ -622,20 +671,23 @@ fun CreateHiveBottomSheet(
 fun EditHiveBottomSheet(
     hive: Hive,
     onDismiss: () -> Unit,
-    onSave: (String, String?) -> Unit
+    onSave: (String, String?, String) -> Unit
 ) {
     var name by remember { mutableStateOf(hive.name) }
     var description by remember { mutableStateOf(hive.description ?: "") }
+    var iconName by remember { mutableStateOf(hive.iconName) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+        contentWindowInsets = { BottomSheetDefaults.windowInsets }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 32.dp)
                 .padding(bottom = 64.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Text(
                 "Refine Hive",
@@ -645,6 +697,10 @@ fun EditHiveBottomSheet(
             )
             
             Spacer(Modifier.height(40.dp))
+            
+            IconPickerRow(selectedIcon = iconName, onIconSelected = { iconName = it })
+
+            Spacer(Modifier.height(32.dp))
 
             OutlinedTextField(
                 value = name,
@@ -669,7 +725,10 @@ fun EditHiveBottomSheet(
             Spacer(Modifier.height(48.dp))
 
             Button(
-                onClick = { onSave(name, description.ifBlank { null }) },
+                onClick = { 
+                    onSave(name, description.ifBlank { null }, iconName)
+                    onDismiss()
+                },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(72.dp),
                 shape = RoundedCornerShape(24.dp)

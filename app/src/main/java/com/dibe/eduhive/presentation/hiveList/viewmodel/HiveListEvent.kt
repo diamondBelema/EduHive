@@ -5,7 +5,7 @@ import com.dibe.eduhive.domain.model.Hive
 // Events
 sealed class HiveListEvent {
     object LoadHives : HiveListEvent()
-    data class CreateHive(val name: String, val description: String?) : HiveListEvent()
+    data class CreateHive(val name: String, val description: String?, val iconName: String) : HiveListEvent()
     data class SelectHive(val hiveId: String) : HiveListEvent()
     object ClearSelectedHive : HiveListEvent()
     object ShowCreateDialog : HiveListEvent()
@@ -13,7 +13,7 @@ sealed class HiveListEvent {
     // Edit
     data class ShowEditDialog(val hive: Hive) : HiveListEvent()
     object HideEditDialog : HiveListEvent()
-    data class EditHive(val hiveId: String, val name: String, val description: String?) : HiveListEvent()
+    data class EditHive(val hiveId: String, val name: String, val description: String?, val iconName: String) : HiveListEvent()
     // Delete
     data class ShowDeleteConfirm(val hive: Hive) : HiveListEvent()
     object HideDeleteConfirm : HiveListEvent()

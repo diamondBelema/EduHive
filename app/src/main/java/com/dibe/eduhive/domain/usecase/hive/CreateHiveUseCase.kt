@@ -16,7 +16,8 @@ class CreateHiveUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(
         name: String,
-        description: String? = null
+        description: String? = null,
+        iconName: String = "School"
     ): Result<Hive> {
         return try {
             // Validate input
@@ -29,6 +30,7 @@ class CreateHiveUseCase @Inject constructor(
                 id = UUID.randomUUID().toString(),
                 name = name.trim(),
                 description = description?.trim(),
+                iconName = iconName,
                 createdAt = System.currentTimeMillis(),
                 lastAccessedAt = System.currentTimeMillis()
             )

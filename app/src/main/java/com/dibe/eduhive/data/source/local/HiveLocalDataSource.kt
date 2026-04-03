@@ -2,7 +2,7 @@ package com.dibe.eduhive.data.source.local
 
 import com.dibe.eduhive.data.local.dao.HiveDao
 import com.dibe.eduhive.data.local.entity.HiveEntity
-import jakarta.inject.Inject
+import javax.inject.Inject
 
 
 /**
@@ -23,8 +23,8 @@ class HiveLocalDataSource @Inject constructor(
     suspend fun updateLastAccessed(id: String, time: Long) =
         hiveDao.updateLastAccessed(id, time)
 
-    suspend fun updateNameAndDescription(id: String, name: String, description: String?) =
-        hiveDao.updateNameAndDescription(id, name, description)
+    suspend fun updateHiveDetails(id: String, name: String, description: String?, iconName: String) =
+        hiveDao.updateHiveDetails(id, name, description, iconName)
 
     suspend fun setArchived(id: String, archived: Boolean) =
         hiveDao.setArchived(id, archived)

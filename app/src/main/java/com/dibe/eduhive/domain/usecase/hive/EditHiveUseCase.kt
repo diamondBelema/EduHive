@@ -9,13 +9,14 @@ class EditHiveUseCase @Inject constructor(
     suspend operator fun invoke(
         hiveId: String,
         name: String,
-        description: String?
+        description: String?,
+        iconName: String
     ): Result<Unit> {
         return try {
             if (name.isBlank()) {
                 return Result.failure(IllegalArgumentException("Hive name cannot be empty"))
             }
-            hiveRepository.updateHive(hiveId, name.trim(), description?.trim())
+            hiveRepository.updateHive(hiveId, name.trim(), description?.trim(), iconName)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

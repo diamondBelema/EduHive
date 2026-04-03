@@ -3,6 +3,7 @@ package com.dibe.eduhive.presentation.documentChat.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.dibe.eduhive.data.session.ActiveHiveStore
 import com.dibe.eduhive.domain.usecase.chat.AskHiveQuestionUseCase
 import com.dibe.eduhive.domain.usecase.chat.DocumentChatAnswer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -16,10 +17,13 @@ import javax.inject.Inject
 @HiltViewModel
 class DocumentChatViewModel @Inject constructor(
     private val askHiveQuestionUseCase: AskHiveQuestionUseCase,
+    private val activeHiveStore: ActiveHiveStore,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val hiveId: String = savedStateHandle["hiveId"] ?: "ALL"
+    private val hiveId: String = savedStateHandle["hiveId"]
+        ?: activeHiveStore.activeHiveId.value
+        ?: "ALL"
 
     private val _state = MutableStateFlow(DocumentChatState())
     val state: StateFlow<DocumentChatState> = _state.asStateFlow()

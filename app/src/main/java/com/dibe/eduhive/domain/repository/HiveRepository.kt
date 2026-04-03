@@ -21,7 +21,7 @@ interface HiveRepository {
 
     suspend fun updateLastAccessed(hiveId: String, timestamp: Long)
 
-    suspend fun updateHive(hiveId: String, name: String, description: String?)
+    suspend fun updateHive(hiveId: String, name: String, description: String?, iconName: String)
 
     suspend fun archiveHive(hiveId: String)
 

@@ -11,6 +11,8 @@ data class HiveEntity(
     @PrimaryKey val hiveId: String,
     val name: String,
     val description: String?,
+    @ColumnInfo(name = "iconName", defaultValue = "School")
+    val iconName: String = "School",
     val createdAt: Long,
     val lastAccessedAt: Long,
     @ColumnInfo(name = "isArchived", defaultValue = "0")
@@ -20,6 +22,7 @@ data class HiveEntity(
         id = hiveId,
         name = name,
         description = description,
+        iconName = iconName,
         createdAt = createdAt,
         lastAccessedAt = lastAccessedAt,
         isArchived = isArchived
@@ -30,6 +33,7 @@ data class HiveEntity(
             hiveId = hive.id,
             name = hive.name,
             description = hive.description,
+            iconName = hive.iconName,
             createdAt = hive.createdAt,
             lastAccessedAt = hive.lastAccessedAt,
             isArchived = hive.isArchived

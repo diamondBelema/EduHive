@@ -7,7 +7,6 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.dibe.eduhive.data.local.dao.*
 import com.dibe.eduhive.data.local.entity.*
-import jakarta.inject.Inject
 
 @Database(
     entities = [
@@ -19,7 +18,7 @@ import jakarta.inject.Inject
         QuizQuestionEntity::class,
         ReviewEventEntity::class
     ],
-    version = 2
+    version = 3
 )
 @TypeConverters(EnumConverters::class)
 abstract class EduHiveDatabase : RoomDatabase() {
@@ -37,6 +36,15 @@ abstract class EduHiveDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE hives ADD COLUMN isArchived INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /** Add iconName column to hives table. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE hives ADD COLUMN iconName TEXT NOT NULL DEFAULT 'School'"
                 )
             }
         }
