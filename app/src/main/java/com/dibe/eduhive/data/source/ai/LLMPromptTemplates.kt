@@ -103,23 +103,25 @@ FRONT:""".trimIndent()
 Generate $count quiz questions strictly about: $conceptName
 $factsBlock
 
-Use ONLY the facts above. Output questions in this exact format:
+Use ONLY the facts above. Write real questions and real answer options — do NOT copy the format labels or use placeholder text.
+
+Output questions in this exact format (replace the example text with real content about $conceptName):
 
 QUESTION 1
 TYPE: MCQ
-TEXT: [question specific to $conceptName]
-OPTION A: [answer]
-OPTION B: [answer]
-OPTION C: [answer]
-OPTION D: [answer]
-CORRECT: [A/B/C/D]
+TEXT: What is the primary function of $conceptName?
+OPTION A: First possible answer
+OPTION B: Second possible answer
+OPTION C: Third possible answer
+OPTION D: Fourth possible answer
+CORRECT: A
 
 QUESTION 2
 TYPE: TRUE_FALSE
-TEXT: [true or false statement specific to $conceptName]
+TEXT: $conceptName is responsible for a specific process described in the facts.
 OPTION A: True
 OPTION B: False
-CORRECT: [A or B]
+CORRECT: A
 
 GENERATE $count QUESTIONS ABOUT $conceptName:
 QUESTION 1
