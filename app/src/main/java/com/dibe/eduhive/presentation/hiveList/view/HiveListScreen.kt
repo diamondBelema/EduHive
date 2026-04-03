@@ -1,35 +1,34 @@
 package com.dibe.eduhive.presentation.hiveList.view
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Hive
 import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListEvent
 import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListViewModel
@@ -41,9 +40,7 @@ fun HiveListScreen(
     onHiveSelected: (String) -> Unit
 ) {
     val state by viewModel.state.collectAsState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
-    val searchFocusRequester = remember { FocusRequester() }
 
     val isFabExpanded by remember {
         derivedStateOf { listState.firstVisibleItemIndex == 0 }
@@ -56,107 +53,111 @@ fun HiveListScreen(
         }
     }
 
-    LaunchedEffect(state.isSearchActive) {
-        if (state.isSearchActive) {
-            runCatching { searchFocusRequester.requestFocus() }.onFailure { /* Focus unavailable; no-op */ }
-        }
-    }
-
-    Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        topBar = {
-            LargeTopAppBar(
-                title = {
-                    AnimatedContent(
-                        targetState = state.isSearchActive,
-                        transitionSpec = { fadeIn() togetherWith fadeOut() },
-                        label = "title_search"
-                    ) { isSearching ->
-                        if (isSearching) {
-                            OutlinedTextField(
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // App Header with branding
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            tonalElevation = 0.dp
+        ) {
+            Column(modifier = Modifier.statusBarsPadding()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.School,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "Edu Hive",
+                            fontWeight = FontWeight.ExtraBold,
+                            style = MaterialTheme.typography.titleLarge,
+                            letterSpacing = (-0.5).sp
+                        )
+                    }
+                    
+                    IconButton(onClick = { viewModel.onEvent(HiveListEvent.ShowArchiveSheet) }) {
+                        Icon(Icons.Rounded.Inventory2, contentDescription = "Archive", modifier = Modifier.size(24.dp))
+                    }
+                }
+                
+                // Persistent Search Widget
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .height(56.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (state.searchQuery.isEmpty()) {
+                                Text(
+                                    "Search your study hives...",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                            }
+                            BasicTextField(
                                 value = state.searchQuery,
                                 onValueChange = { viewModel.onEvent(HiveListEvent.UpdateSearch(it)) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .focusRequester(searchFocusRequester),
-                                placeholder = { Text("Search hives…") },
-                                singleLine = true,
-                                shape = MaterialTheme.shapes.extraLarge,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                    color = MaterialTheme.colorScheme.onSurface
                                 ),
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                },
-                                trailingIcon = {
-                                    if (state.searchQuery.isNotBlank()) {
-                                        IconButton(onClick = { viewModel.onEvent(HiveListEvent.UpdateSearch("")) }) {
-                                            Icon(Icons.Rounded.Close, contentDescription = "Clear")
-                                        }
-                                    }
-                                }
+                                singleLine = true
                             )
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("EduHive", fontWeight = FontWeight.Black)
-                                Spacer(Modifier.width(12.dp))
-                                Icon(Icons.Rounded.School, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                        if (state.searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { viewModel.onEvent(HiveListEvent.UpdateSearch("")) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
-                },
-                actions = {
-                    AnimatedContent(
-                        targetState = state.isSearchActive,
-                        transitionSpec = { scaleIn() + fadeIn() togetherWith scaleOut() + fadeOut() },
-                        label = "action_search"
-                    ) { isSearching ->
-                        if (isSearching) {
-                            IconButton(onClick = { viewModel.onEvent(HiveListEvent.ClearSearch) }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Close search")
-                            }
-                        } else {
-                            Row {
-                                IconButton(onClick = { viewModel.onEvent(HiveListEvent.ToggleSearch) }) {
-                                    Icon(Icons.Default.Search, contentDescription = "Search hives")
-                                }
-                                IconButton(onClick = { viewModel.onEvent(HiveListEvent.ShowArchiveSheet) }) {
-                                    Icon(Icons.Rounded.Inventory2, contentDescription = "View archive")
-                                }
-                            }
-                        }
-                    }
-                },
-                scrollBehavior = scrollBehavior
-            )
-        },
-        floatingActionButton = {
-            AnimatedVisibility(
-                visible = !state.isSearchActive,
-                enter = scaleIn() + fadeIn(),
-                exit = scaleOut() + fadeOut()
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) },
-                    expanded = isFabExpanded,
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Create Hive") },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                }
             }
         }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
+
+        Box(modifier = Modifier.weight(1f)) {
             val displayHives = state.filteredHives
             when {
                 state.isLoading && state.hives.isEmpty() -> {
@@ -167,45 +168,20 @@ fun HiveListScreen(
 
                 state.hives.isEmpty() -> {
                     EmptyHivesState(
-                        onCreateClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) },
-                        modifier = Modifier.align(Alignment.Center)
+                        onCreateClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) }
                     )
                 }
 
                 displayHives.isEmpty() && state.searchQuery.isNotBlank() -> {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center).padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.outline
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            "No hives match \"${state.searchQuery}\"",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Try a different name or description.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    NoSearchResults(state.searchQuery)
                 }
 
                 else -> {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         items(displayHives, key = { it.id }) { hive ->
                             HiveCardExpressive(
@@ -216,199 +192,244 @@ fun HiveListScreen(
                                 onDelete = { viewModel.onEvent(HiveListEvent.ShowDeleteConfirm(hive)) }
                             )
                         }
+                        item { Spacer(Modifier.height(88.dp)) }
                     }
                 }
             }
 
-            AnimatedVisibility(
-                visible = state.error != null,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                state.error?.let { error ->
-                    Snackbar(
-                        modifier = Modifier.padding(16.dp),
-                        action = {
-                            TextButton(onClick = { viewModel.onEvent(HiveListEvent.ClearError) }) {
-                                Text("Dismiss")
-                            }
-                        }
-                    ) {
-                        Text(error)
-                    }
-                }
-            }
-        }
-
-        if (state.showCreateDialog) {
-            CreateHiveBottomSheet(
-                onDismiss = { viewModel.onEvent(HiveListEvent.HideCreateDialog) },
-                onCreate = { name, description ->
-                    viewModel.onEvent(HiveListEvent.CreateHive(name, description))
-                }
-            )
-        }
-
-        state.hiveToEdit?.let { hive ->
-            EditHiveBottomSheet(
-                hive = hive,
-                onDismiss = { viewModel.onEvent(HiveListEvent.HideEditDialog) },
-                onSave = { name, description ->
-                    viewModel.onEvent(HiveListEvent.EditHive(hive.id, name, description))
-                }
-            )
-        }
-
-        state.hiveToDelete?.let { hive ->
-            DeleteHiveDialog(
-                hive = hive,
-                onDismiss = { viewModel.onEvent(HiveListEvent.HideDeleteConfirm) },
-                onConfirm = { viewModel.onEvent(HiveListEvent.DeleteHive(hive.id)) }
-            )
-        }
-
-        if (state.showArchiveSheet) {
-            ArchivedHivesSheet(
-                archivedHives = state.archivedHives,
-                isLoading = state.isLoadingArchived,
-                onDismiss = { viewModel.onEvent(HiveListEvent.HideArchiveSheet) },
-                onUnarchive = { hiveId -> viewModel.onEvent(HiveListEvent.UnarchiveHive(hiveId)) }
+            ExtendedFloatingActionButton(
+                onClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) },
+                expanded = isFabExpanded,
+                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                text = { Text("Create Hive", fontWeight = FontWeight.Bold) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = CircleShape,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
             )
         }
     }
+
+    if (state.showCreateDialog) {
+        CreateHiveBottomSheet(
+            onDismiss = { viewModel.onEvent(HiveListEvent.HideCreateDialog) },
+            onCreate = { name, description ->
+                viewModel.onEvent(HiveListEvent.CreateHive(name, description))
+            }
+        )
+    }
+
+    state.hiveToEdit?.let { hive ->
+        EditHiveBottomSheet(
+            hive = hive,
+            onDismiss = { viewModel.onEvent(HiveListEvent.HideEditDialog) },
+            onSave = { name, description ->
+                viewModel.onEvent(HiveListEvent.EditHive(hive.id, name, description))
+            }
+        )
+    }
+
+    state.hiveToDelete?.let { hive ->
+        DeleteHiveDialog(
+            hive = hive,
+            onDismiss = { viewModel.onEvent(HiveListEvent.HideDeleteConfirm) },
+            onConfirm = { viewModel.onEvent(HiveListEvent.DeleteHive(hive.id)) }
+        )
+    }
+
+    if (state.showArchiveSheet) {
+        ArchivedHivesSheet(
+            archivedHives = state.archivedHives,
+            isLoading = state.isLoadingArchived,
+            onDismiss = { viewModel.onEvent(HiveListEvent.HideArchiveSheet) },
+            onUnarchive = { hiveId -> viewModel.onEvent(HiveListEvent.UnarchiveHive(hiveId)) }
+        )
+    }
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HiveCardExpressive(
     hive: Hive,
     onClick: () -> Unit,
-    onEdit: () -> Unit = {},
-    onArchive: () -> Unit = {},
-    onDelete: () -> Unit = {}
+    onEdit: () -> Unit,
+    onArchive: () -> Unit,
+    onDelete: () -> Unit
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
 
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = { showContextMenu = true }
-            ),
+    Surface(
+        onClick = onClick,
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier
-                .padding(20.dp)
-                .fillMaxWidth()
+            modifier = Modifier.padding(20.dp)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.AutoAwesome, 
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                
+                Spacer(Modifier.width(16.dp))
+                
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = hive.name,
-                        style = MaterialTheme.typography.headlineSmall,
+                        hive.name,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-
-                    hive.description?.let { desc ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = desc,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2
-                        )
-                    }
+                    Text(
+                        "Active • ${formatLastAccessed(hive.lastAccessedAt)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = MaterialTheme.shapes.medium
+                Box {
+                    IconButton(onClick = { showContextMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(
+                        expanded = showContextMenu,
+                        onDismissRequest = { showContextMenu = false }
                     ) {
-                        Icon(
-                            Icons.Rounded.School,
-                            contentDescription = null,
-                            modifier = Modifier.padding(8.dp).size(24.dp),
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        DropdownMenuItem(
+                            text = { Text("Edit") },
+                            leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                            onClick = { onEdit(); showContextMenu = false }
                         )
-                    }
-                    Box {
-                        IconButton(onClick = { showContextMenu = true }) {
-                            Icon(
-                                Icons.Rounded.MoreVert,
-                                contentDescription = "More options",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showContextMenu,
-                            onDismissRequest = { showContextMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Edit") },
-                                leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                                onClick = {
-                                    showContextMenu = false
-                                    onEdit()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Archive") },
-                                leadingIcon = { Icon(Icons.Rounded.Inventory2, contentDescription = null) },
-                                onClick = {
-                                    showContextMenu = false
-                                    onArchive()
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Rounded.Delete,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                },
-                                onClick = {
-                                    showContextMenu = false
-                                    onDelete()
-                                }
-                            )
-                        }
+                        DropdownMenuItem(
+                            text = { Text("Archive") },
+                            leadingIcon = { Icon(Icons.Rounded.Archive, null) },
+                            onClick = { onArchive(); showContextMenu = false }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { onDelete(); showContextMenu = false }
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.AccessTime,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(6.dp))
+            if (!hive.description.isNullOrBlank()) {
+                Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "Active ${formatLastAccessed(hive.lastAccessedAt)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    hive.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 20.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun NoSearchResults(query: String) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            Icons.Rounded.SearchOff,
+            contentDescription = null,
+            modifier = Modifier.size(80.dp),
+            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "No Results Found",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black
+        )
+        Text(
+            "We couldn't find any hive matching \"$query\".",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+    }
+}
+
+@Composable
+fun EmptyHivesState(onCreateClick: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = CircleShape,
+            modifier = Modifier.size(120.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.AutoAwesome, 
+                    contentDescription = null, 
+                    modifier = Modifier.size(60.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+        
+        Spacer(Modifier.height(32.dp))
+        
+        Text(
+            "Welcome to Edu Hive",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(Modifier.height(16.dp))
+        
+        Text(
+            "Create your first study hive to transform your documents into on-device intelligence.",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 24.sp
+        )
+        
+        Spacer(Modifier.height(48.dp))
+        
+        Button(
+            onClick = onCreateClick,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+        ) {
+            Icon(Icons.Rounded.Add, null)
+            Spacer(Modifier.width(12.dp))
+            Text("Initialize Your First Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -421,196 +442,59 @@ fun ArchivedHivesSheet(
     onDismiss: () -> Unit,
     onUnarchive: (String) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.extraLarge
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, bottom = 48.dp, top = 8.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 48.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = CircleShape,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.Inventory2,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
+            Text(
+                "Archived Hives",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black
+            )
+            Spacer(Modifier.height(24.dp))
+
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+            } else if (archivedHives.isEmpty()) {
                 Text(
-                    "Archived Hives",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                    "No archived hives found.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            when {
-                isLoading -> {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(120.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(strokeWidth = 3.dp)
-                    }
-                }
-                archivedHives.isEmpty() -> {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Rounded.Inventory2,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.outline
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            "No archived hives",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Archived hives will appear here.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-                else -> {
-                    archivedHives.forEach { hive ->
-                        ArchivedHiveItem(
-                            hive = hive,
-                            onUnarchive = { onUnarchive(hive.id) }
-                        )
-                        Spacer(Modifier.height(8.dp))
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(archivedHives) { hive ->
+                        Surface(
+                            shape = MaterialTheme.shapes.large,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(hive.name, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "Archived ${formatLastAccessed(hive.lastAccessedAt)}",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                                FilledTonalButton(onClick = { onUnarchive(hive.id) }) {
+                                    Text("Restore")
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ArchivedHiveItem(
-    hive: Hive,
-    onUnarchive: () -> Unit
-) {
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = CircleShape,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.School,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = hive.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                hive.description?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
-                }
-            }
-            FilledTonalButton(
-                onClick = onUnarchive,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Icon(
-                    Icons.Rounded.Unarchive,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Restore", style = MaterialTheme.typography.labelMedium)
-            }
-        }
-    }
-}
-
-@Composable
-fun EmptyHivesState(
-    onCreateClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.padding(40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = MaterialTheme.shapes.extraLarge,
-            modifier = Modifier.size(120.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.School, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
-        }
-        Spacer(modifier = Modifier.height(32.dp))
-        Text(
-            text = "Your Hive is empty",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = "Create a study hive to start turning your materials into intelligence.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(40.dp))
-        Button(
-            onClick = onCreateClick,
-            modifier = Modifier.height(56.dp).fillMaxWidth(),
-            shape = MaterialTheme.shapes.large
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text("Initialize New Hive", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -621,64 +505,56 @@ fun CreateHiveBottomSheet(
     onDismiss: () -> Unit,
     onCreate: (String, String?) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState()
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.extraLarge
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, bottom = 48.dp, top = 8.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 64.dp)
         ) {
             Text(
-                "New Knowledge Hive",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                "New Hive",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black
             )
-            Spacer(modifier = Modifier.height(24.dp))
+
+            Spacer(Modifier.height(32.dp))
 
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Hive Name") },
-                placeholder = { Text("e.g. Physics Core Concepts") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("Goal or Description") },
+                label = { Text("Focus (e.g. Exam prep, project)") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 minLines = 3
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
 
             Button(
-                onClick = {
-                    if (name.isNotBlank()) {
-                        onCreate(name, description.ifBlank { null })
-                        onDismiss()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                onClick = { onCreate(name, description.ifBlank { null }) },
                 enabled = name.isNotBlank(),
-                shape = MaterialTheme.shapes.large
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                shape = MaterialTheme.shapes.extraLarge
             ) {
-                Text("Establish Hive", style = MaterialTheme.typography.titleMedium)
+                Text("Establish Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -691,28 +567,26 @@ fun EditHiveBottomSheet(
     onDismiss: () -> Unit,
     onSave: (String, String?) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState()
-    var name by remember(hive.id) { mutableStateOf(hive.name) }
-    var description by remember(hive.id) { mutableStateOf(hive.description ?: "") }
+    var name by remember { mutableStateOf(hive.name) }
+    var description by remember { mutableStateOf(hive.description ?: "") }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.extraLarge
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, bottom = 48.dp, top = 8.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 64.dp)
         ) {
             Text(
                 "Edit Hive",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Black
             )
-            Spacer(modifier = Modifier.height(24.dp))
+            
+            Spacer(Modifier.height(32.dp))
 
             OutlinedTextField(
                 value = name,
@@ -723,31 +597,26 @@ fun EditHiveBottomSheet(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("Goal or Description") },
+                label = { Text("Description") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 minLines = 3
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
 
             Button(
-                onClick = {
-                    if (name.isNotBlank()) {
-                        onSave(name, description.ifBlank { null })
-                        onDismiss()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                onClick = { onSave(name, description.ifBlank { null }) },
                 enabled = name.isNotBlank(),
-                shape = MaterialTheme.shapes.large
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                shape = MaterialTheme.shapes.extraLarge
             ) {
-                Text("Save Changes", style = MaterialTheme.typography.titleMedium)
+                Text("Update Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -761,35 +630,18 @@ fun DeleteHiveDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                Icons.Rounded.Delete,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error
-            )
-        },
-        title = { Text("Delete \"${hive.name}\"?") },
-        text = {
-            Text(
-                "This will permanently delete the hive and ALL its concepts, flashcards, and quizzes. This cannot be undone.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-        },
+        title = { Text("Delete Hive?") },
+        text = { Text("This will permanently remove \"${hive.name}\" and all knowledge. This action is irreversible.") },
         confirmButton = {
             Button(
                 onClick = { onConfirm(); onDismiss() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError
-                )
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
                 Text("Delete")
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
