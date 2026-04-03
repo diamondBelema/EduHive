@@ -60,13 +60,21 @@ fun AddMaterialScreen(
     val activeWorkInfo by workManager.getWorkInfosByTagFlow("material_processing")
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val currentWork = activeWorkInfo.firstOrNull {
-        it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
-    }
+    val currentWork = activeWorkInfo
+        .filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+        .maxByOrNull { it.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0) }
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var showTitleSheet by remember { mutableStateOf(false) }
     var showCancelDialog by remember { mutableStateOf(false) }
+
+    // Monotonic progress floor — ensures the progress bar never visually goes backward,
+    // even if WorkManager restarts the worker from scratch (e.g. after process death).
+    val progressHighWater = remember { mutableStateOf(0f) }
+    LaunchedEffect(currentWork?.id) {
+        // Reset the floor only when the work item itself changes identity.
+        progressHighWater.value = 0f
+    }
 
     LaunchedEffect(state.error) {
         state.error?.let { error ->
@@ -135,7 +143,12 @@ fun AddMaterialScreen(
                 label = "processing_transition"
             ) { isProcessing ->
                 if (isProcessing && currentWork != null) {
-                    val progress = currentWork.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0) / 100f
+                    val rawProgress = currentWork.progress.getInt(MaterialProcessingWorker.KEY_PROGRESS, 0) / 100f
+                    // Clamp to the high-water mark so the bar never moves backward.
+                    val displayProgress = rawProgress.coerceAtLeast(progressHighWater.value)
+                    SideEffect {
+                        if (rawProgress > progressHighWater.value) progressHighWater.value = rawProgress
+                    }
                     val status = currentWork.progress.getString(MaterialProcessingWorker.KEY_STATUS) ?: "Queued..."
                     val validCount = currentWork.progress.getInt(MaterialProcessingWorker.KEY_VALID_COUNT, 0)
                     val currentConcept = currentWork.progress.getInt(MaterialProcessingWorker.KEY_CURRENT_CONCEPT, 0)
@@ -144,7 +157,7 @@ fun AddMaterialScreen(
 
                     ProcessingStateExpressive(
                         status = status,
-                        progress = progress,
+                        progress = displayProgress,
                         successMessage = state.successMessage ?: summary,
                         flashcardsValid = validCount,
                         currentConcept = currentConcept,

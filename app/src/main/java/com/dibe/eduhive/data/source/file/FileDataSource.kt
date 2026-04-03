@@ -114,10 +114,12 @@ class FileDataSource @Inject constructor(
                     val pageText = stripper.getText(document).trim()
 
                     if (pageText.length < MIN_TEXT_PAGE_LENGTH) {
-                        // Page has no selectable text — OCR the rendered image
+                        // Page has no selectable text — OCR the rendered image.
+                        // 150 DPI is sufficient for ML Kit and uses ~4× less memory than 300 DPI
+                        // (roughly 8 MB per letter-size page vs 33 MB at 300 DPI).
                         Log.d(TAG, "Page $i has only ${pageText.length} chars — using OCR fallback")
                         val renderer = PDFRenderer(document)
-                        val bitmap = renderer.renderImageWithDPI(i - 1, 300f)
+                        val bitmap = renderer.renderImageWithDPI(i - 1, 150f)
                         val ocrText = extractTextFromBitmap(bitmap)
                         bitmap.recycle()
                         rawPages.add(ocrText)
@@ -146,8 +148,14 @@ class FileDataSource @Inject constructor(
         suspendCancellableCoroutine { cont ->
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             recognizer.process(inputImage)
-                .addOnSuccessListener { visionText -> cont.resume(visionText.text) }
-                .addOnFailureListener { e -> cont.resumeWithException(OcrException("OCR failed", e)) }
+                .addOnSuccessListener { visionText ->
+                    recognizer.close()
+                    cont.resume(visionText.text)
+                }
+                .addOnFailureListener { e ->
+                    recognizer.close()
+                    cont.resumeWithException(OcrException("OCR failed", e))
+                }
             cont.invokeOnCancellation { recognizer.close() }
         }
 
