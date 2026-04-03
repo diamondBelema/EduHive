@@ -1,13 +1,11 @@
 package com.dibe.eduhive.presentation.conceptList.view
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -15,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -22,10 +21,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Concept
-import com.dibe.eduhive.domain.model.Flashcard
-import com.dibe.eduhive.domain.model.Quiz
-import com.dibe.eduhive.domain.model.QuizQuestion
-import com.dibe.eduhive.presentation.addMaterial.view.ProcessingStateExpressive
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListEvent
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListState
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListViewModel
@@ -132,6 +127,11 @@ fun ConceptListScreen(
                 state.isGenerating -> {
                     GeneratingOverlay(
                         message = state.generationProgress ?: "Generating...",
+                        progress = state.generationProgressFloat,
+                        completed = state.generationCompleted,
+                        total = state.generationTotal,
+                        currentConceptName = state.currentConceptName,
+                        generationMode = state.generationMode,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
@@ -451,30 +451,224 @@ private fun GenerateChip(
 }
 
 // ---------------------------------------------------------------------------
-// Generating overlay
+// Generating overlay — expressive card mirroring the AddMaterial style
 // ---------------------------------------------------------------------------
 
 @Composable
 private fun GeneratingOverlay(
     message: String,
+    progress: Float,
+    completed: Int,
+    total: Int,
+    currentConceptName: String?,
+    generationMode: GenerationMode?,
     modifier: Modifier = Modifier
 ) {
-    val progress = message
-        .substringAfterLast(" ", "")
-        .removeSuffix("%")
-        .toIntOrNull()
-        ?.coerceIn(0, 100)
-        ?.div(100f)
-        ?: 0.6f
+    // Pulse animation for the glow ring
+    val infiniteTransition = rememberInfiniteTransition(label = "glow")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
 
-    Box(modifier = modifier.fillMaxWidth()) {
-        // Reuse expressive loading UI from material import for consistent app feel.
-        ProcessingStateExpressive(
-            status = message,
-            progress = progress,
-            successMessage = null,
-            flashcardsValid = 0,
-        )
+    // Smooth progress animation
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "progress"
+    )
+
+    val modeLabel = when (generationMode) {
+        GenerationMode.FLASHCARDS -> "Flashcards"
+        GenerationMode.QUIZ -> "Quiz Questions"
+        GenerationMode.BOTH -> "Flashcards & Quiz"
+        null -> "Content"
+    }
+    val modeIcon = when (generationMode) {
+        GenerationMode.FLASHCARDS -> Icons.Rounded.Style
+        GenerationMode.QUIZ -> Icons.Rounded.Quiz
+        GenerationMode.BOTH -> Icons.Rounded.AutoAwesome
+        null -> Icons.Rounded.AutoAwesome
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
+        // Glowing progress ring
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(140.dp)
+        ) {
+            // Glow backdrop
+            Surface(
+                modifier = Modifier.size(130.dp).clip(CircleShape),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = glowAlpha),
+                shape = CircleShape
+            ) {}
+
+            // Track ring
+            CircularProgressIndicator(
+                progress = { 1f },
+                modifier = Modifier.size(120.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+                strokeWidth = 8.dp
+            )
+            // Progress ring
+            CircularProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier.size(120.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                strokeWidth = 8.dp,
+                strokeCap = StrokeCap.Round
+            )
+            // Centre content
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    modeIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = if (total > 0) "$completed/$total" else "…",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        // Info card
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Mode badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                modeIcon,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                modeLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    // Animated dots to show activity
+                    Text(
+                        text = "Generating",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Current concept name
+                AnimatedContent(
+                    targetState = currentConceptName,
+                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) },
+                    label = "conceptName"
+                ) { name ->
+                    if (name != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                            shape = MaterialTheme.shapes.large
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.LightbulbCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                                Text(
+                                    text = name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
+                        Box(Modifier.fillMaxWidth().height(40.dp))
+                    }
+                }
+
+                // Status message
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Linear progress bar
+                LinearProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape),
+                    strokeCap = StrokeCap.Round,
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+
+                Text(
+                    text = if (total > 0) "${(animatedProgress * 100).toInt()}% complete" else "Preparing…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.End
+                )
+            }
+        }
     }
 }
 

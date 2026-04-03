@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dibe.eduhive.domain.model.enums.ConfidenceLevel
+import com.dibe.eduhive.domain.repository.FlashcardRepository
 import com.dibe.eduhive.domain.usecase.review.ReviewFlashcardUseCase
 import com.dibe.eduhive.domain.usecase.study.GetNextReviewItemsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,6 +20,7 @@ import javax.inject.Inject
 class FlashcardStudyViewModel @Inject constructor(
     private val getNextReviewItemsUseCase: GetNextReviewItemsUseCase,
     private val reviewFlashcardUseCase: ReviewFlashcardUseCase,
+    private val flashcardRepository: FlashcardRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -28,7 +30,7 @@ class FlashcardStudyViewModel @Inject constructor(
     val state: StateFlow<FlashcardStudyState> = _state.asStateFlow()
 
     init {
-        loadNextFlashcards(allowContinueWhenNoDue = true)
+        loadScheduledFlashcards()
     }
 
     fun onEvent(event: FlashcardStudyEvent) {
@@ -40,22 +42,23 @@ class FlashcardStudyViewModel @Inject constructor(
                 rateFlashcard(event.level)
             }
             is FlashcardStudyEvent.Reload -> {
-                loadNextFlashcards(allowContinueWhenNoDue = true)
+                loadScheduledFlashcards()
             }
             is FlashcardStudyEvent.StudyAnyway -> {
-                loadNextFlashcards(allowContinueWhenNoDue = true)
+                startFreePractice()
             }
         }
     }
 
-    private fun loadNextFlashcards(allowContinueWhenNoDue: Boolean = false) {
+    /** Load cards according to the SRS schedule (normal study mode). */
+    private fun loadScheduledFlashcards() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
+            _state.update { it.copy(isLoading = true, isFreePractice = false) }
 
             getNextReviewItemsUseCase(
                 hiveId = hiveId,
                 limit = 20,
-                allowContinueWhenNoDue = allowContinueWhenNoDue
+                allowContinueWhenNoDue = false
             ).fold(
                 onSuccess = { flashcards ->
                     _state.update {
@@ -66,7 +69,8 @@ class FlashcardStudyViewModel @Inject constructor(
                             isFlipped = false,
                             isComplete = false,
                             completedCount = 0,
-                            error = if (flashcards.isEmpty()) "No flashcards available in this hive yet." else null
+                            isFreePractice = false,
+                            error = null
                         )
                     }
                 },
@@ -82,44 +86,82 @@ class FlashcardStudyViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Free-practice mode: loads ALL flashcards for the hive without any scheduling
+     * constraint. Ratings in this mode only move through the deck — they do NOT update
+     * Leitner boxes or Bayesian confidence, preserving the algorithm's state.
+     */
+    private fun startFreePractice() {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val allCards = flashcardRepository.getStudyFallbackFlashcards(
+                    hiveId = hiveId,
+                    limit = 100
+                )
+                _state.update {
+                    it.copy(
+                        flashcards = allCards,
+                        currentIndex = 0,
+                        isLoading = false,
+                        isFlipped = false,
+                        isComplete = false,
+                        completedCount = 0,
+                        isFreePractice = true,
+                        error = if (allCards.isEmpty()) "No flashcards in this hive yet." else null
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "Could not load flashcards"
+                    )
+                }
+            }
+        }
+    }
+
     private fun rateFlashcard(level: ConfidenceLevel) {
         val currentFlashcard = state.value.flashcards.getOrNull(state.value.currentIndex)
             ?: return
 
         viewModelScope.launch {
-            reviewFlashcardUseCase(
-                flashcardId = currentFlashcard.id,
-                confidenceLevel = level
-            ).fold(
-                onSuccess = {
-                    // Move to next flashcard
-                    val nextIndex = state.value.currentIndex + 1
+            if (state.value.isFreePractice) {
+                // Free-practice: skip SRS update, just advance to next card
+                advanceToNextCard()
+            } else {
+                reviewFlashcardUseCase(
+                    flashcardId = currentFlashcard.id,
+                    confidenceLevel = level
+                ).fold(
+                    onSuccess = { advanceToNextCard() },
+                    onFailure = { error ->
+                        _state.update {
+                            it.copy(error = error.message ?: "Failed to review flashcard")
+                        }
+                    }
+                )
+            }
+        }
+    }
 
-                    if (nextIndex >= state.value.flashcards.size) {
-                        // All done!
-                        _state.update {
-                            it.copy(
-                                isComplete = true,
-                                completedCount = state.value.flashcards.size
-                            )
-                        }
-                    } else {
-                        _state.update {
-                            it.copy(
-                                currentIndex = nextIndex,
-                                isFlipped = false
-                            )
-                        }
-                    }
-                },
-                onFailure = { error ->
-                    _state.update {
-                        it.copy(error = error.message ?: "Failed to review flashcard")
-                    }
-                }
-            )
+    private fun advanceToNextCard() {
+        val nextIndex = state.value.currentIndex + 1
+        if (nextIndex >= state.value.flashcards.size) {
+            _state.update {
+                it.copy(
+                    isComplete = true,
+                    completedCount = state.value.flashcards.size
+                )
+            }
+        } else {
+            _state.update {
+                it.copy(
+                    currentIndex = nextIndex,
+                    isFlipped = false
+                )
+            }
         }
     }
 }
-
-

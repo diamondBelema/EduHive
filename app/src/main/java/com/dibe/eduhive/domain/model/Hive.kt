@@ -14,5 +14,6 @@ data class Hive(
     val name: String,
     val description: String? = null,
     val createdAt: Long,
-    val lastAccessedAt: Long
+    val lastAccessedAt: Long,
+    val isArchived: Boolean = false
 )

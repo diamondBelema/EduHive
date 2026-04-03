@@ -57,10 +57,9 @@ object DatabaseModule {
             EduHiveDatabase::class.java,
             "eduhive_database"
         )
+            .addMigrations(EduHiveDatabase.MIGRATION_1_2)
             // Safety net: if the schema changes and no migration is written, Room
             // clears and rebuilds the database rather than crashing the app.
-            // Replace this with proper Migration objects before any production release
-            // that needs to preserve existing user data across schema changes.
             .fallbackToDestructiveMigration(true)
             .build()
 

@@ -16,10 +16,18 @@ class HiveLocalDataSource @Inject constructor(
 
     suspend fun getAll() = hiveDao.getAll()
 
+    suspend fun getArchived() = hiveDao.getArchived()
+
     suspend fun getById(id: String) = hiveDao.getById(id)
 
     suspend fun updateLastAccessed(id: String, time: Long) =
         hiveDao.updateLastAccessed(id, time)
+
+    suspend fun updateNameAndDescription(id: String, name: String, description: String?) =
+        hiveDao.updateNameAndDescription(id, name, description)
+
+    suspend fun setArchived(id: String, archived: Boolean) =
+        hiveDao.setArchived(id, archived)
 
     suspend fun delete(id: String) = hiveDao.delete(id)
 }
