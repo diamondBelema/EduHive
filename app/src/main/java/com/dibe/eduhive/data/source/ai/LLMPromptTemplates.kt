@@ -10,6 +10,15 @@ object LLMPromptTemplates {
         "osmosis"
     )
 
+    /**
+     * Lowercased question texts used as format examples in [quizGeneration].
+     * Stored here so [parseQuizFromResponse] can filter them out without duplicating the strings.
+     */
+    val QUIZ_EXAMPLE_QUESTION_TEXTS = setOf(
+        "during osmosis, which direction does water move?",
+        "osmosis requires energy from the cell to move water molecules."
+    )
+
     // ── Concept extraction ────────────────────────────────────────────────────
 
     fun conceptExtraction(text: String, hiveContext: String = ""): String {

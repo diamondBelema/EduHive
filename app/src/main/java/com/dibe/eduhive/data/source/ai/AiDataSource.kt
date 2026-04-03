@@ -682,10 +682,7 @@ class AIDataSource @Inject constructor(
         val questions = mutableListOf<GeneratedQuizQuestion>()
         val seenTexts = mutableSetOf<String>()
         // Exact or prefix matches for the osmosis format-example questions baked into the prompt.
-        val exampleTexts = setOf(
-            "during osmosis, which direction does water move?",
-            "osmosis requires energy from the cell to move water molecules."
-        )
+        val exampleTexts = LLMPromptTemplates.QUIZ_EXAMPLE_QUESTION_TEXTS
 
         val blocks = response.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))
 
