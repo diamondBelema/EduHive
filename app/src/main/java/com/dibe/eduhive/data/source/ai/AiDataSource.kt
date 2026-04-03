@@ -51,6 +51,14 @@ class AIDataSource @Inject constructor(
         private const val FLASHCARDS_PER_CONCEPT = 3
 
         /**
+         * Max unique concepts to accept from a single batch.
+         * Small models loop — they'll repeat the same concept 40+ times in one response.
+         * Capping at 5 per batch means even a fully looping response contributes at most
+         * 5 concepts, and duplicates are filtered against the global seenNames set.
+         */
+        private const val MAX_CONCEPTS_PER_BATCH = 5
+
+        /**
          * Max flashcard facts to inject into a quiz prompt.
          */
         private const val MAX_FACTS_PER_QUIZ = 3
@@ -111,22 +119,14 @@ class AIDataSource @Inject constructor(
         }
 
         val allExtractedConcepts = mutableListOf<ExtractedConcept>()
+        // Track seen names across ALL batches to stop duplicates accumulating
+        val seenNames = mutableSetOf<String>()
 
-        // Merge pages into batches before sending to the model.
-        //
-        // Each page averages ~400-600 chars after cleaning, but MAX_INPUT_CHARS_CONCEPTS
-        // is 1600 chars. Running one model call per page wastes ~65% of the input budget
-        // and multiplies generation time linearly with page count.
-        //
-        // Strategy: pack pages into batches that stay under the char limit, separated by
-        // a blank line so the model sees them as distinct sections. This reduces model
-        // calls by ~3x on a typical PDF without losing any content.
         val batches = mutableListOf<String>()
         val currentBatch = StringBuilder()
         for (page in pages) {
             val trimmed = page.trim()
             if (trimmed.isBlank()) continue
-            // +2 for the "\n\n" separator added between pages
             if (currentBatch.isNotEmpty() && currentBatch.length + trimmed.length + 2 > MAX_INPUT_CHARS_CONCEPTS) {
                 batches.add(currentBatch.toString().trim())
                 currentBatch.clear()
@@ -144,16 +144,33 @@ class AIDataSource @Inject constructor(
         batches.forEachIndexed { index, batch ->
             send(ConceptExtractionState.Progress(((index.toFloat() / totalBatches) * 100).toInt()))
 
-
-
             val prompt = LLMPromptTemplates.conceptExtraction(batch, hiveContext)
             val result = modelManager.generate(prompt)
 
             result.onSuccess { response ->
-                Log.d(TAG, "RAW RESPONSE BATCH $index:\n$response")  // must be here
+                Log.d(TAG, "RAW RESPONSE BATCH $index:\n$response")
                 val batchConcepts = parseConceptsRobust(response)
-                Log.d(TAG, "Batch $index: parsed ${batchConcepts.size} concepts")
-                allExtractedConcepts.addAll(batchConcepts)
+
+                // Deduplicate within this batch AND against all previous batches.
+                // Small models loop — a single batch can return the same concept 40 times.
+                // Cap at MAX_CONCEPTS_PER_BATCH unique names per batch to stop runaway loops.
+                var addedThisBatch = 0
+                val newUniqueConcepts = mutableListOf<ExtractedConcept>()
+                for (concept in batchConcepts) {
+                    val key = concept.name.lowercase().trim()
+                    if (key !in seenNames && addedThisBatch < MAX_CONCEPTS_PER_BATCH) {
+                        seenNames.add(key)
+                        allExtractedConcepts.add(concept)
+                        newUniqueConcepts.add(concept)
+                        addedThisBatch++
+                    }
+                }
+                Log.d(TAG, "Batch $index: parsed ${batchConcepts.size} concepts, added $addedThisBatch unique")
+                // Emit after each batch so the repository can save incrementally.
+                // If the process is killed mid-extraction, already-saved batches survive.
+                if (newUniqueConcepts.isNotEmpty()) {
+                    send(ConceptExtractionState.BatchComplete(newUniqueConcepts))
+                }
             }.onFailure { e ->
                 failedBatches++
                 Log.w(TAG, "Batch $index failed ($failedBatches/$totalBatches): ${e.message}")
@@ -164,7 +181,8 @@ class AIDataSource @Inject constructor(
             }
         }
 
-        val uniqueConcepts = deduplicateConcepts(allExtractedConcepts)
+        // Already deduplicated above, but run once more to be safe
+        val uniqueConcepts = allExtractedConcepts.distinctBy { it.name.lowercase().trim() }
 
         when {
             uniqueConcepts.isNotEmpty() -> {
@@ -481,28 +499,11 @@ class AIDataSource @Inject constructor(
     }
 
     private fun parseGroundedAnswer(response: String): GroundedAnswer {
-        // Prompt ends with "ANSWER:" so the model continues inline.
-        // The full response IS the answer — just clean it up.
-        // Still try to find structured fields if the model happened to include them.
-        val lines = response.trim().lines()
-
         val answerLine = response
             .lineSequence()
             .firstOrNull { it.trim().startsWith("ANSWER:", ignoreCase = true) }
             ?.substringAfter(":")
             ?.trim()
-
-        // If no structured ANSWER: line, the entire response is the answer
-        val answer = when {
-            !answerLine.isNullOrBlank() -> answerLine
-            response.isNotBlank() -> response.trim()
-                .lines()
-                .filterNot { it.trim().startsWith("CONFIDENCE:", ignoreCase = true) }
-                .filterNot { it.trim().startsWith("CITATIONS:", ignoreCase = true) }
-                .joinToString(" ")
-                .trim()
-            else -> ""
-        }
 
         val confidence = response
             .lineSequence()
@@ -511,7 +512,7 @@ class AIDataSource @Inject constructor(
             ?.trim()
             ?.uppercase()
             ?.takeIf { it in setOf("HIGH", "MEDIUM", "LOW") }
-            ?: "MEDIUM"
+            ?: "LOW"
 
         val citationLine = response
             .lineSequence()
@@ -530,7 +531,9 @@ class AIDataSource @Inject constructor(
         }
 
         return GroundedAnswer(
-            answer = answer,
+            answer = answerLine
+                ?.takeIf { it.isNotBlank() }
+                ?: response.trim().lines().firstOrNull().orEmpty(),
             confidence = confidence,
             citationIndexes = citationIndexes
         )
@@ -778,6 +781,8 @@ private data class ValidationResult(
 sealed class ConceptExtractionState {
     object Loading : ConceptExtractionState()
     data class Progress(val percent: Int) : ConceptExtractionState()
+    /** Emitted after each batch completes with new unique concepts from that batch only. */
+    data class BatchComplete(val newConcepts: List<ExtractedConcept>) : ConceptExtractionState()
     data class Success(val concepts: List<ExtractedConcept>) : ConceptExtractionState()
     data class Error(val message: String) : ConceptExtractionState()
 }

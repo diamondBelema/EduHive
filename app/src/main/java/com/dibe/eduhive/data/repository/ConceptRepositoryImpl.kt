@@ -101,6 +101,8 @@ class ConceptRepositoryImpl @Inject constructor(
     ): Flow<ConceptExtractionProgress> = flow {
         emit(ConceptExtractionProgress.Loading)
 
+        val allSavedConcepts = mutableListOf<Concept>()
+
         aiDataSource.extractConceptsFromPagesStreaming(
             pages = pages,
             hiveContext = hiveContext
@@ -112,8 +114,10 @@ class ConceptRepositoryImpl @Inject constructor(
                 is ConceptExtractionState.Progress -> {
                     emit(ConceptExtractionProgress.Processing(state.percent))
                 }
-                is ConceptExtractionState.Success -> {
-                    val domainConcepts = state.concepts.map { aiConcept ->
+                is ConceptExtractionState.BatchComplete -> {
+                    // Save this batch's concepts immediately — if the process is killed
+                    // mid-extraction, concepts from completed batches are already in the DB.
+                    val batchDomainConcepts = state.newConcepts.map { aiConcept ->
                         Concept(
                             id = UUID.randomUUID().toString(),
                             hiveId = hiveId,
@@ -123,14 +127,36 @@ class ConceptRepositoryImpl @Inject constructor(
                             lastReviewedAt = null
                         )
                     }
-
-                    // Save to database
-                    addConcepts(domainConcepts)
-
-                    emit(ConceptExtractionProgress.Success(domainConcepts))
+                    addConcepts(batchDomainConcepts)
+                    allSavedConcepts.addAll(batchDomainConcepts)
+                }
+                is ConceptExtractionState.Success -> {
+                    // Final success — emit all concepts that were saved across batches.
+                    // We don't re-save here since BatchComplete already wrote them.
+                    val finalConcepts = if (allSavedConcepts.isNotEmpty()) {
+                        allSavedConcepts
+                    } else {
+                        // Fallback: if no BatchComplete events fired, save now
+                        state.concepts.map { aiConcept ->
+                            Concept(
+                                id = UUID.randomUUID().toString(),
+                                hiveId = hiveId,
+                                name = aiConcept.name,
+                                description = aiConcept.description,
+                                confidence = 0.3,
+                                lastReviewedAt = null
+                            )
+                        }.also { addConcepts(it) }
+                    }
+                    emit(ConceptExtractionProgress.Success(finalConcepts))
                 }
                 is ConceptExtractionState.Error -> {
-                    emit(ConceptExtractionProgress.Error(state.message))
+                    // Even on error, if we saved some concepts via BatchComplete, report partial success
+                    if (allSavedConcepts.isNotEmpty()) {
+                        emit(ConceptExtractionProgress.Success(allSavedConcepts))
+                    } else {
+                        emit(ConceptExtractionProgress.Error(state.message))
+                    }
                 }
             }
         }
