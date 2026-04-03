@@ -711,7 +711,7 @@ class AIDataSource @Inject constructor(
             val lowerText = text.trim().lowercase()
             if (lowerText in exampleTexts) continue
             if (exampleTexts.any { lowerText.startsWith(it) }) continue
-            if (lowerText.startsWith("[") || (lowerText.contains("[") && lowerText.contains("]"))) continue
+            if (Regex("""^\[.*]$""").matches(lowerText)) continue
             val key = lowerText
             if (key in seenTexts) continue
             seenTexts.add(key)
