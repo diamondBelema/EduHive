@@ -254,6 +254,8 @@ class MaterialProcessingWorker @AssistedInject constructor(
     }
 
     companion object {
+        private const val TAG = "MaterialWorker"
+
         const val KEY_URI = "uri"
         const val KEY_HIVE_ID = "hiveId"
         const val KEY_TITLE = "title"

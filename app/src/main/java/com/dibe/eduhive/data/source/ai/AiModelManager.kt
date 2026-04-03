@@ -115,15 +115,21 @@ class AIModelManager @Inject constructor(
     }
 
     fun getRecommendedModel(): ModelInfo {
-        val runtime = Runtime.getRuntime()
-        val maxMemoryMB = runtime.maxMemory() / (1024 * 1024)
+        // Use ActivityManager to read total device RAM.
+        // Runtime.maxMemory() only returns the JVM heap limit (typically 256–512 MB
+        // regardless of device RAM), which made every device appear to be "low memory".
+        // The AI model weights are loaded as native memory, so total RAM is the right signal.
+        val activityManager = context.getSystemService(android.app.ActivityManager::class.java)
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memInfo)
+        val totalRamMB = memInfo.totalMem / (1024L * 1024L)
 
         return when {
-            maxMemoryMB > 8000 -> getModelInfo(MODEL_GEMMA4_2B)
-            maxMemoryMB > 6000 -> getModelInfo(MODEL_GEMMA3_1B)
-            maxMemoryMB > 4000 -> getModelInfo(MODEL_QWEN)
-            maxMemoryMB > 2000 -> getModelInfo(MODEL_GEMMA3_270M)
-            else -> getModelInfo(MODEL_SMOLLM_135M)
+            totalRamMB >= 6000 -> getModelInfo(MODEL_GEMMA4_2B)
+            totalRamMB >= 4000 -> getModelInfo(MODEL_GEMMA3_1B)
+            totalRamMB >= 3000 -> getModelInfo(MODEL_QWEN)
+            totalRamMB >= 2000 -> getModelInfo(MODEL_GEMMA3_270M)
+            else               -> getModelInfo(MODEL_SMOLLM_135M)
         }
     }
 
