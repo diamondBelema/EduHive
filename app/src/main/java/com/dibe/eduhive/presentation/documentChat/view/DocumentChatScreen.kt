@@ -136,15 +136,15 @@ fun DocumentChatScreen(
     }
 }
 
+private val chatSuggestions = listOf(
+    "Summarize my study materials",
+    "Explain the key concepts",
+    "What are the main topics?",
+    "Quiz me on what I know"
+)
+
 @Composable
 private fun ChatHeroCard(onSuggestionClick: (String) -> Unit = {}) {
-    val suggestions = listOf(
-        "Summarize my study materials",
-        "Explain the key concepts",
-        "What are the main topics?",
-        "Quiz me on what I know"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -194,7 +194,7 @@ private fun ChatHeroCard(onSuggestionClick: (String) -> Unit = {}) {
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            suggestions.chunked(2).forEach { row ->
+            chatSuggestions.chunked(2).forEach { row ->
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     modifier = Modifier.fillMaxWidth()

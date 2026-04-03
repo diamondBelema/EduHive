@@ -23,6 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+private const val STUDY_TIP =
+    "Consistent short sessions beat marathon crams. Try 15–20 minutes daily for best retention."
+
 @Composable
 fun StudyNowScreen(
     onStartFlashcards: () -> Unit,
@@ -116,7 +119,7 @@ fun StudyNowScreen(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "Consistent short sessions beat marathon crams. Try 15–20 minutes daily for best retention.",
+                        STUDY_TIP,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp

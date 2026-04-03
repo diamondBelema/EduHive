@@ -58,7 +58,7 @@ fun HiveListScreen(
 
     LaunchedEffect(state.isSearchActive) {
         if (state.isSearchActive) {
-            runCatching { searchFocusRequester.requestFocus() }
+            runCatching { searchFocusRequester.requestFocus() }.onFailure { /* Focus unavailable; no-op */ }
         }
     }
 
