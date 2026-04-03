@@ -100,33 +100,30 @@ FRONT:""".trimIndent()
         }
 
         return """
-Write $count unique quiz questions about: $conceptName
+Generate $count quiz questions strictly about: $conceptName
 $factsBlock
 
-Instructions:
-1. Use TRUE_FALSE or MCQ format.
-2. Avoid generic questions. Be very specific to the provided context.
-3. DO NOT repeat the examples below.
-4. Output only the generated questions.
+Use ONLY the facts above. Write real questions and real answer options — do NOT copy the format labels or use placeholder text.
 
-EXAMPLES:
+Output questions in this exact format (replace the example text with real content about $conceptName):
+
 QUESTION 1
+TYPE: MCQ
+TEXT: What is the primary function of $conceptName?
+OPTION A: First possible answer
+OPTION B: Second possible answer
+OPTION C: Third possible answer
+OPTION D: Fourth possible answer
+CORRECT: A
+
+QUESTION 2
 TYPE: TRUE_FALSE
-TEXT: The French Revolution began in 1789.
+TEXT: $conceptName is responsible for a specific process described in the facts.
 OPTION A: True
 OPTION B: False
 CORRECT: A
 
-QUESTION 2
-TYPE: MCQ
-TEXT: Which country did Napoleon Bonaparte originally come from?
-OPTION A: France
-OPTION B: Corsica
-OPTION C: Italy
-OPTION D: Spain
-CORRECT: B
-
-NOW GENERATE $count QUESTIONS FOR $conceptName:
+GENERATE $count QUESTIONS ABOUT $conceptName:
 QUESTION 1
 TYPE:""".trimIndent()
     }

@@ -34,4 +34,7 @@ class ConceptLocalDataSource @Inject constructor(
 
     suspend fun deleteById(conceptId: String) =
         conceptDao.deleteById(conceptId)
+
+    suspend fun getAll() =
+        conceptDao.getAll()
 }

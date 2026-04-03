@@ -82,7 +82,6 @@ fun DocumentChatScreen(
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // Background Decorative Elements
             Box(
                 modifier = Modifier
                     .size(300.dp)
@@ -104,7 +103,13 @@ fun DocumentChatScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     if (state.messages.isEmpty()) {
-                        item { ChatHeroCard() }
+                        item {
+                            ChatHeroCard(
+                                onSuggestionClick = { suggestion ->
+                                    viewModel.onEvent(DocumentChatEvent.UpdateInput(suggestion))
+                                }
+                            )
+                        }
                     }
 
                     items(state.messages) { message ->
@@ -131,8 +136,15 @@ fun DocumentChatScreen(
     }
 }
 
+private val chatSuggestions = listOf(
+    "Summarize my study materials",
+    "Explain the key concepts",
+    "What are the main topics?",
+    "Quiz me on what I know"
+)
+
 @Composable
-private fun ChatHeroCard() {
+private fun ChatHeroCard(onSuggestionClick: (String) -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -154,14 +166,14 @@ private fun ChatHeroCard() {
                 )
             }
         }
-        
+
         Text(
             "Knowledge Hive Chat",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center
         )
-        
+
         Text(
             "Ask specific questions about your study materials. Your tutor uses local AI to provide grounded answers.",
             style = MaterialTheme.typography.bodyMedium,
@@ -170,12 +182,38 @@ private fun ChatHeroCard() {
             modifier = Modifier.padding(horizontal = 24.dp)
         )
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(top = 16.dp)
+        Text(
+            "Try asking:",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SuggestionChip(onClick = {}, label = { Text("Summarize docs") })
-            SuggestionChip(onClick = {}, label = { Text("Explain concepts") })
+            chatSuggestions.chunked(2).forEach { row ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    row.forEach { suggestion ->
+                        SuggestionChip(
+                            onClick = { onSuggestionClick(suggestion) },
+                            label = { Text(suggestion, maxLines = 1) },
+                            icon = {
+                                Icon(
+                                    Icons.Rounded.AutoAwesome,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }

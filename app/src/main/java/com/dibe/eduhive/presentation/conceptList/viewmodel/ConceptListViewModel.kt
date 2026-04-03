@@ -50,29 +50,85 @@ class ConceptListViewModel @Inject constructor(
     /**
      * Re-attach observers for any WorkManager jobs that were running when the
      * ViewModel was last destroyed (e.g. user navigated away mid-generation).
-     * Work IDs are persisted in SavedStateHandle so they survive ViewModel recreation.
+     *
+     * Strategy:
+     * 1. Try to restore from SavedStateHandle (covers process recreation / config change).
+     * 2. Fall back to querying WorkManager by tag for this hiveId (covers the case where
+     *    the user navigated *back* past the ConceptList — destroying the back-stack entry
+     *    and its SavedStateHandle — then returned to the screen).
      */
     private fun reattachPendingWork() {
         val conceptIds = savedStateHandle.get<Array<String>>(KEY_PENDING_CONCEPT_IDS)
-            ?.toList() ?: return // nothing was pending
+            ?.toList()
 
         val flashId = savedStateHandle.get<String>(KEY_PENDING_FLASH_WORK_ID)
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val quizId = savedStateHandle.get<String>(KEY_PENDING_QUIZ_WORK_ID)
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
-        when {
-            flashId != null && quizId != null -> {
+        if (conceptIds != null && (flashId != null || quizId != null)) {
+            // Restore from SavedStateHandle
+            when {
+                flashId != null && quizId != null -> {
+                    _state.update { it.copy(isGenerating = true, generationProgress = "Resuming generation...") }
+                    observeBothWork(flashId, quizId, conceptIds)
+                }
+                flashId != null -> {
+                    _state.update { it.copy(isGenerating = true, generationProgress = "Resuming flashcard generation...") }
+                    observeFlashcardWork(flashId, conceptIds, GenerationMode.FLASHCARDS)
+                }
+                quizId != null -> {
+                    _state.update { it.copy(isGenerating = true, generationProgress = "Resuming quiz generation...") }
+                    observeQuizWork(quizId, conceptIds, GenerationMode.QUIZ)
+                }
+            }
+        } else {
+            // Fall back to WorkManager tag query — finds work that belongs to this hive
+            // even when the nav back-stack entry was destroyed.
+            reattachFromWorkManagerTags()
+        }
+    }
+
+    /**
+     * Queries WorkManager for any RUNNING/ENQUEUED flashcard or quiz generation work
+     * tagged to this hiveId. Re-attaches observers so the UI can resume showing progress.
+     */
+    private fun reattachFromWorkManagerTags() {
+        viewModelScope.launch {
+            val allWork = workManager.getWorkInfosByTag("flashcard_generation").get() +
+                workManager.getWorkInfosByTag("quiz_generation").get()
+
+            val activeFlash = allWork
+                .filter { it.tags.contains("flashcard_generation") }
+                .filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+                .filter { it.progress.getString(FlashcardGenerationWorker.KEY_HIVE_ID) == hiveId }
+                .maxByOrNull { it.id.toString() }
+
+            val activeQuiz = allWork
+                .filter { it.tags.contains("quiz_generation") }
+                .filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+                .filter { it.progress.getString(QuizGenerationWorker.KEY_HIVE_ID) == hiveId }
+                .maxByOrNull { it.id.toString() }
+
+            if (activeFlash != null || activeQuiz != null) {
+                // We found running work — recover concept IDs from worker input
+                val conceptIds = (activeFlash ?: activeQuiz)
+                    ?.let {
+                        // The worker stores them in input data; also try outputData/progress
+                        workManager.getWorkInfoById(it.id).get()?.outputData
+                            ?.getStringArray(FlashcardGenerationWorker.KEY_CONCEPT_IDS)?.toList()
+                    } ?: emptyList()
+
                 _state.update { it.copy(isGenerating = true, generationProgress = "Resuming generation...") }
-                observeBothWork(flashId, quizId, conceptIds)
-            }
-            flashId != null -> {
-                _state.update { it.copy(isGenerating = true, generationProgress = "Resuming flashcard generation...") }
-                observeFlashcardWork(flashId, conceptIds, GenerationMode.FLASHCARDS)
-            }
-            quizId != null -> {
-                _state.update { it.copy(isGenerating = true, generationProgress = "Resuming quiz generation...") }
-                observeQuizWork(quizId, conceptIds, GenerationMode.QUIZ)
+
+                when {
+                    activeFlash != null && activeQuiz != null ->
+                        observeBothWork(activeFlash.id, activeQuiz.id, conceptIds)
+                    activeFlash != null ->
+                        observeFlashcardWork(activeFlash.id, conceptIds, GenerationMode.FLASHCARDS)
+                    activeQuiz != null ->
+                        observeQuizWork(activeQuiz.id, conceptIds, GenerationMode.QUIZ)
+                }
             }
         }
     }
@@ -136,11 +192,16 @@ class ConceptListViewModel @Inject constructor(
         if (selectedConcepts.isEmpty()) return
 
         val conceptIds = selectedConcepts.map { it.id }
+        val total = conceptIds.size
 
         _state.update {
             it.copy(
                 isGenerating = true,
                 generationProgress = "Scheduling generation...",
+                generationProgressFloat = 0f,
+                generationTotal = total,
+                generationCompleted = 0,
+                currentConceptName = null,
                 selectedIds = emptySet()
             )
         }
@@ -176,7 +237,17 @@ class ConceptListViewModel @Inject constructor(
                     WorkInfo.State.RUNNING -> {
                         val completed = workInfo.progress.getInt(FlashcardGenerationWorker.KEY_COMPLETED, 0)
                         val total = workInfo.progress.getInt(FlashcardGenerationWorker.KEY_TOTAL, 0)
-                        _state.update { it.copy(generationProgress = "Generating flashcards: $completed/$total") }
+                        val conceptName = workInfo.progress.getString(FlashcardGenerationWorker.KEY_CURRENT_CONCEPT_NAME)
+                        val progress = if (total > 0) completed.toFloat() / total.toFloat() else 0f
+                        _state.update {
+                            it.copy(
+                                generationProgress = "Generating flashcards: $completed/$total",
+                                generationProgressFloat = progress,
+                                generationCompleted = completed,
+                                generationTotal = total,
+                                currentConceptName = conceptName?.takeIf { s -> s.isNotEmpty() }
+                            )
+                        }
                     }
                     WorkInfo.State.SUCCEEDED -> {
                         clearPendingWorkState()
@@ -187,6 +258,7 @@ class ConceptListViewModel @Inject constructor(
                             it.copy(
                                 isGenerating = false,
                                 generationProgress = null,
+                                generationProgressFloat = 1f,
                                 generatedFlashcards = flashcards,
                                 generationMode = mode
                             )
@@ -198,6 +270,7 @@ class ConceptListViewModel @Inject constructor(
                             it.copy(
                                 isGenerating = false,
                                 generationProgress = null,
+                                generationProgressFloat = 0f,
                                 error = "Flashcard generation failed"
                             )
                         }
@@ -215,7 +288,17 @@ class ConceptListViewModel @Inject constructor(
                     WorkInfo.State.RUNNING -> {
                         val completed = workInfo.progress.getInt(QuizGenerationWorker.KEY_COMPLETED, 0)
                         val total = workInfo.progress.getInt(QuizGenerationWorker.KEY_TOTAL, 0)
-                        _state.update { it.copy(generationProgress = "Generating quiz: $completed/$total") }
+                        val conceptName = workInfo.progress.getString(QuizGenerationWorker.KEY_CURRENT_CONCEPT_NAME)
+                        val progress = if (total > 0) completed.toFloat() / total.toFloat() else 0f
+                        _state.update {
+                            it.copy(
+                                generationProgress = "Generating quiz: $completed/$total",
+                                generationProgressFloat = progress,
+                                generationCompleted = completed,
+                                generationTotal = total,
+                                currentConceptName = conceptName?.takeIf { s -> s.isNotEmpty() }
+                            )
+                        }
                     }
                     WorkInfo.State.SUCCEEDED -> {
                         clearPendingWorkState()
@@ -224,6 +307,7 @@ class ConceptListViewModel @Inject constructor(
                             it.copy(
                                 isGenerating = false,
                                 generationProgress = null,
+                                generationProgressFloat = 1f,
                                 generatedQuizPairs = quizPairs,
                                 generationMode = mode
                             )
@@ -235,6 +319,7 @@ class ConceptListViewModel @Inject constructor(
                             it.copy(
                                 isGenerating = false,
                                 generationProgress = null,
+                                generationProgressFloat = 0f,
                                 error = "Quiz generation failed"
                             )
                         }
@@ -262,6 +347,7 @@ class ConceptListViewModel @Inject constructor(
                                 it.copy(
                                     isGenerating = false,
                                     generationProgress = null,
+                                    generationProgressFloat = 0f,
                                     error = "Generation failed"
                                 )
                             }
@@ -276,6 +362,7 @@ class ConceptListViewModel @Inject constructor(
                                 it.copy(
                                     isGenerating = false,
                                     generationProgress = null,
+                                    generationProgressFloat = 1f,
                                     generatedFlashcards = flashcards,
                                     generatedQuizPairs = quizPairs,
                                     generationMode = GenerationMode.BOTH
@@ -287,9 +374,19 @@ class ConceptListViewModel @Inject constructor(
                             val flashTotal = flashInfo?.progress?.getInt(FlashcardGenerationWorker.KEY_TOTAL, 0) ?: 0
                             val quizCompleted = quizInfo?.progress?.getInt(QuizGenerationWorker.KEY_COMPLETED, 0) ?: 0
                             val quizTotal = quizInfo?.progress?.getInt(QuizGenerationWorker.KEY_TOTAL, 0) ?: 0
+                            val flashConceptName = flashInfo?.progress?.getString(FlashcardGenerationWorker.KEY_CURRENT_CONCEPT_NAME)
+                            val quizConceptName = quizInfo?.progress?.getString(QuizGenerationWorker.KEY_CURRENT_CONCEPT_NAME)
+                            val combinedTotal = flashTotal + quizTotal
+                            val combinedCompleted = flashCompleted + quizCompleted
+                            val progress = if (combinedTotal > 0) combinedCompleted.toFloat() / combinedTotal.toFloat() else 0f
                             _state.update {
                                 it.copy(
-                                    generationProgress = "Flashcards: $flashCompleted/$flashTotal | Quiz: $quizCompleted/$quizTotal"
+                                    generationProgress = "Flashcards: $flashCompleted/$flashTotal | Quiz: $quizCompleted/$quizTotal",
+                                    generationProgressFloat = progress,
+                                    generationCompleted = combinedCompleted,
+                                    generationTotal = combinedTotal,
+                                    currentConceptName = flashConceptName?.takeIf { s -> s.isNotEmpty() }
+                                        ?: quizConceptName?.takeIf { s -> s.isNotEmpty() }
                                 )
                             }
                         }
@@ -332,29 +429,3 @@ class ConceptListViewModel @Inject constructor(
     }
 }
 
-data class ConceptListState(
-    val isLoading: Boolean = false,
-    val concepts: List<Concept> = emptyList(),
-    val selectedIds: Set<String> = emptySet(),
-    val isGenerating: Boolean = false,
-    val generationProgress: String? = null,
-    val generatedFlashcards: List<Flashcard> = emptyList(),
-    val generatedQuizPairs: List<Pair<Quiz, List<QuizQuestion>>> = emptyList(),
-    val generationMode: GenerationMode? = null,
-    val error: String? = null
-) {
-    val isSelectionActive: Boolean get() = selectedIds.isNotEmpty()
-    val selectedCount: Int get() = selectedIds.size
-}
-
-enum class GenerationMode { FLASHCARDS, QUIZ, BOTH }
-
-sealed class ConceptListEvent {
-    object Reload : ConceptListEvent()
-    data class ToggleSelection(val conceptId: String) : ConceptListEvent()
-    object SelectWeak : ConceptListEvent()
-    object ClearSelection : ConceptListEvent()
-    data class Generate(val mode: GenerationMode) : ConceptListEvent()
-    object ClearGenerated : ConceptListEvent()
-    object DismissError : ConceptListEvent()
-}

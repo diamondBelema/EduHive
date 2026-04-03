@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dibe.eduhive.domain.model.Quiz
 import com.dibe.eduhive.domain.model.QuizQuestion
+import com.dibe.eduhive.domain.repository.ConceptRepository
 import com.dibe.eduhive.domain.repository.QuizRepository
 import com.dibe.eduhive.domain.usecase.concept.GetConceptsByHiveUseCase
 import com.dibe.eduhive.domain.usecase.review.QuizQuestionResult
@@ -20,12 +21,14 @@ import javax.inject.Inject
 @HiltViewModel
 class QuizStudyViewModel @Inject constructor(
     private val getConceptsByHiveUseCase: GetConceptsByHiveUseCase,
+    private val conceptRepository: ConceptRepository,
     private val quizRepository: QuizRepository,
     private val submitQuizResultUseCase: SubmitQuizResultUseCase,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     private val hiveId: String = checkNotNull(savedStateHandle["hiveId"])
+    private val isAllHives: Boolean get() = hiveId == "ALL"
 
     private val _state = MutableStateFlow(QuizStudyState())
     val state: StateFlow<QuizStudyState> = _state.asStateFlow()
@@ -92,7 +95,14 @@ class QuizStudyViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
 
-            getConceptsByHiveUseCase(hiveId).fold(
+            val conceptsResult = if (isAllHives) {
+                try { Result.success(conceptRepository.getAllConcepts()) }
+                catch (e: Exception) { Result.failure(e) }
+            } else {
+                getConceptsByHiveUseCase(hiveId)
+            }
+
+            conceptsResult.fold(
                 onSuccess = { concepts ->
                     val quizPairs = mutableListOf<Pair<Quiz, List<QuizQuestion>>>()
 

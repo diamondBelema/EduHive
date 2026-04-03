@@ -17,4 +17,6 @@ class MaterialLocalDataSource @Inject constructor(
     suspend fun markProcessed(id: String) = materialDao.markProcessed(id)
 
     suspend fun delete(id: String) = materialDao.delete(id)
+
+    suspend fun getAllProcessed() = materialDao.getAllProcessed()
 }

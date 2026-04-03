@@ -23,7 +23,7 @@ import com.dibe.eduhive.presentation.flashcardList.view.FlashcardListScreen
 import com.dibe.eduhive.presentation.flashcardStudy.view.FlashcardStudyScreen
 import com.dibe.eduhive.presentation.generationPreview.view.GenerationPreviewScreen
 import com.dibe.eduhive.presentation.generationPreview.viewmodel.GenerationPreviewViewModel
-import com.dibe.eduhive.presentation.hiveList.view.HiveListScreen
+import com.dibe.eduhive.presentation.main.view.MainScreen
 import com.dibe.eduhive.presentation.materialList.view.MaterialListScreen
 import com.dibe.eduhive.presentation.quizStudy.view.QuizStudyScreen
 import com.dibe.eduhive.presentation.reviewList.view.ReviewListScreen
@@ -96,9 +96,15 @@ fun EduHiveNavigation(
         }
 
         composable(Screen.HiveList.route) {
-            HiveListScreen(
+            MainScreen(
                 onHiveSelected = { hiveId ->
                     navController.navigate(Screen.HiveDashboard.createRoute(hiveId))
+                },
+                onNavigateToFlashcardStudy = {
+                    navController.navigate(Screen.FlashcardStudy.createRoute("ALL"))
+                },
+                onNavigateToQuizStudy = {
+                    navController.navigate(Screen.QuizStudy.createRoute("ALL"))
                 }
             )
         }

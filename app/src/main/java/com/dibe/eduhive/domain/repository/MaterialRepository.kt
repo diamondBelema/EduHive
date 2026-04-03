@@ -11,6 +11,8 @@ interface MaterialRepository {
 
     suspend fun getMaterialsForHive(hiveId: String): List<Material>
 
+    suspend fun getAllProcessedMaterials(): List<Material>
+
     suspend fun markAsProcessed(materialId: String)
 
     suspend fun deleteMaterial(materialId: String)

@@ -19,6 +19,10 @@ class MaterialRepositoryImpl @Inject constructor(
         return localDataSource.getForHive(hiveId).map { it.toDomain() }
     }
 
+    override suspend fun getAllProcessedMaterials(): List<Material> {
+        return localDataSource.getAllProcessed().map { it.toDomain() }
+    }
+
     override suspend fun markAsProcessed(materialId: String) {
         localDataSource.markProcessed(materialId)
     }

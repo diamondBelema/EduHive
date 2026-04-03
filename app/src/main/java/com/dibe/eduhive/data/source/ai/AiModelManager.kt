@@ -34,11 +34,13 @@ class AIModelManager @Inject constructor(
     companion object {
         const val TAG = "AIModelManager"
 
+        const val MODEL_GEMMA4_2B = "gemma4-2b"
         const val MODEL_GEMMA3_1B = "gemma3-1b"
         const val MODEL_GEMMA3_270M = "gemma3-270m"
         const val MODEL_QWEN = "Qwen2.5-0.5B"
         const val MODEL_SMOLLM_135M = "SmolLM-135M"
 
+        private const val GEMMA4_2B_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task?download=true"
         private const val GEMMA3_1B_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-1b-it-int4.task?download=true"
         private const val QWEN_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
@@ -113,14 +115,21 @@ class AIModelManager @Inject constructor(
     }
 
     fun getRecommendedModel(): ModelInfo {
-        val runtime = Runtime.getRuntime()
-        val maxMemoryMB = runtime.maxMemory() / (1024 * 1024)
+        // Use ActivityManager to read total device RAM.
+        // Runtime.maxMemory() only returns the JVM heap limit (typically 256–512 MB
+        // regardless of device RAM), which made every device appear to be "low memory".
+        // The AI model weights are loaded as native memory, so total RAM is the right signal.
+        val activityManager = context.getSystemService(android.app.ActivityManager::class.java)
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memInfo)
+        val totalRamMB = memInfo.totalMem / (1024L * 1024L)
 
         return when {
-            maxMemoryMB > 6000 -> getModelInfo(MODEL_GEMMA3_1B)
-            maxMemoryMB > 4000 -> getModelInfo(MODEL_QWEN)
-            maxMemoryMB > 2000 -> getModelInfo(MODEL_GEMMA3_270M)
-            else -> getModelInfo(MODEL_SMOLLM_135M)
+            totalRamMB >= 6000 -> getModelInfo(MODEL_GEMMA4_2B)
+            totalRamMB >= 4000 -> getModelInfo(MODEL_GEMMA3_1B)
+            totalRamMB >= 3000 -> getModelInfo(MODEL_QWEN)
+            totalRamMB >= 2000 -> getModelInfo(MODEL_GEMMA3_270M)
+            else               -> getModelInfo(MODEL_SMOLLM_135M)
         }
     }
 
@@ -129,7 +138,8 @@ class AIModelManager @Inject constructor(
             getModelInfo(MODEL_SMOLLM_135M),
             getModelInfo(MODEL_GEMMA3_270M),
             getModelInfo(MODEL_QWEN),
-            getModelInfo(MODEL_GEMMA3_1B)
+            getModelInfo(MODEL_GEMMA3_1B),
+            getModelInfo(MODEL_GEMMA4_2B)
         )
     }
 
@@ -395,6 +405,7 @@ class AIModelManager @Inject constructor(
 
     private fun getModelInfo(modelId: String): ModelInfo {
         return when (modelId) {
+            MODEL_GEMMA4_2B -> ModelInfo(MODEL_GEMMA4_2B, "Gemma 4 2B", "Latest Gemma, superior reasoning", GEMMA4_2B_URL, 1_500_000_000L, 10, false)
             MODEL_GEMMA3_1B -> ModelInfo(MODEL_GEMMA3_1B, "Gemma 3 1B", "Best reasoning, most intelligent", GEMMA3_1B_URL, 555_000_000L, 15, false)
             MODEL_QWEN -> ModelInfo(MODEL_QWEN, "Qwen 2.5 0.5B", "Fast and high-quality", QWEN_URL, 547_000_000L, 30, true)
             MODEL_GEMMA3_270M -> ModelInfo(MODEL_GEMMA3_270M, "Gemma 3 270M", "Balanced performance", GEMMA3_270M_URL, 249_000_000L, 20, false)

@@ -19,4 +19,7 @@ interface MaterialDao {
 
     @Query("DELETE FROM materials WHERE materialId = :id")
     suspend fun delete(id: String)
+
+    @Query("SELECT * FROM materials WHERE processed = 1")
+    suspend fun getAllProcessed(): List<MaterialEntity>
 }

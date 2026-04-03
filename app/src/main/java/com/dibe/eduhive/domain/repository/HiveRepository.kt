@@ -15,9 +15,17 @@ interface HiveRepository {
 
     suspend fun getAllHives(): List<Hive>
 
+    suspend fun getArchivedHives(): List<Hive>
+
     suspend fun getHiveById(hiveId: String): Hive?
 
     suspend fun updateLastAccessed(hiveId: String, timestamp: Long)
+
+    suspend fun updateHive(hiveId: String, name: String, description: String?)
+
+    suspend fun archiveHive(hiveId: String)
+
+    suspend fun unarchiveHive(hiveId: String)
 
     suspend fun deleteHive(hiveId: String)
 }

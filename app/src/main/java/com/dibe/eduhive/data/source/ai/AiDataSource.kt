@@ -61,7 +61,7 @@ class AIDataSource @Inject constructor(
         /**
          * Max flashcard facts to inject into a quiz prompt.
          */
-        private const val MAX_FACTS_PER_QUIZ = 3
+        private const val MAX_FACTS_PER_QUIZ = 5
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -179,6 +179,11 @@ class AIDataSource @Inject constructor(
                     ensureModelLoaded(GenerationConfig.CONCEPT_EXTRACTION)
                 }
             }
+
+            // Report completion of this batch so the progress bar advances during extraction,
+            // not only at the start of the next one. This prevents the indicator from appearing
+            // stuck at 15% while a single large batch is being processed.
+            send(ConceptExtractionState.Progress((((index + 1).toFloat() / totalBatches) * 100).toInt()))
         }
 
         // Already deduplicated above, but run once more to be safe
@@ -679,8 +684,8 @@ class AIDataSource @Inject constructor(
         val questions = mutableListOf<GeneratedQuizQuestion>()
         val seenTexts = mutableSetOf<String>()
         val exampleTexts = setOf(
-            "the french revolution began in 1789",
-            "which country did napoleon bonaparte originally come from"
+            "[question specific to",
+            "[true or false statement specific to"
         )
 
         val blocks = response.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))
@@ -706,8 +711,11 @@ class AIDataSource @Inject constructor(
             }
 
             if (text.isBlank()) continue
-            if (text.trim().lowercase() in exampleTexts) continue
-            val key = text.trim().lowercase()
+            val lowerText = text.trim().lowercase()
+            if (lowerText in exampleTexts) continue
+            if (exampleTexts.any { lowerText.startsWith(it) }) continue
+            if (Regex("""^\[.*]$""").matches(lowerText)) continue
+            val key = lowerText
             if (key in seenTexts) continue
             seenTexts.add(key)
 

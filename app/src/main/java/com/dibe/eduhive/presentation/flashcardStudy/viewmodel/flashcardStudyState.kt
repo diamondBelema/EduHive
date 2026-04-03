@@ -11,6 +11,8 @@ data class FlashcardStudyState(
     val isLoading: Boolean = false,
     val isComplete: Boolean = false,
     val completedCount: Int = 0,
+    /** True when the user is in an unscheduled free-practice session (Study Anyway). */
+    val isFreePractice: Boolean = false,
     val error: String? = null
 ) {
     val currentFlashcard: Flashcard?

@@ -58,16 +58,47 @@ fun FlashcardStudyScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = CircleShape
-                    ) {
-                        Text(
-                            "${state.currentIndex + 1} of ${state.flashcards.size}",
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
+                    AnimatedContent(
+                        targetState = state.isFreePractice,
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "topBarTitle"
+                    ) { isFreePractice ->
+                        if (isFreePractice) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                shape = CircleShape
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Text(
+                                        "Free Practice · ${state.currentIndex + 1}/${state.flashcards.size}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                            }
+                        } else {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = CircleShape
+                            ) {
+                                Text(
+                                    "${state.currentIndex + 1} of ${state.flashcards.size}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -98,6 +129,7 @@ fun FlashcardStudyScreen(
                 state.isComplete -> {
                     StudyCompletionScreenExpressive(
                         count = state.completedCount,
+                        isFreePractice = state.isFreePractice,
                         onContinue = {
                             viewModel.onEvent(FlashcardStudyEvent.StudyAnyway)
                         },
@@ -441,6 +473,7 @@ fun ExpressiveRatingButton(
 @Composable
 fun StudyCompletionScreenExpressive(
     count: Int,
+    isFreePractice: Boolean = false,
     onContinue: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -454,14 +487,20 @@ fun StudyCompletionScreenExpressive(
         Surface(
             modifier = Modifier.size(160.dp),
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            color = if (isFreePractice)
+                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)
+            else
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Rounded.AutoAwesome, 
-                    contentDescription = null, 
+                    if (isFreePractice) Icons.Rounded.School else Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
                     modifier = Modifier.size(80.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = if (isFreePractice)
+                        MaterialTheme.colorScheme.tertiary
+                    else
+                        MaterialTheme.colorScheme.primary
                 )
             }
         }
@@ -469,7 +508,7 @@ fun StudyCompletionScreenExpressive(
         Spacer(modifier = Modifier.height(32.dp))
         
         Text(
-            text = "Session Complete",
+            text = if (isFreePractice) "Practice Complete!" else "Session Complete",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.ExtraBold
         )
@@ -477,20 +516,56 @@ fun StudyCompletionScreenExpressive(
         Spacer(modifier = Modifier.height(12.dp))
         
         Text(
-            text = "You reviewed $count concepts today. Your knowledge hive is growing stronger.",
+            text = if (isFreePractice)
+                "You practised $count cards. Your SRS schedule is unaffected — great job drilling!"
+            else
+                "You reviewed $count concepts today. Your knowledge hive is growing stronger.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+
+        if (isFreePractice) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = MaterialTheme.shapes.large
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Rounded.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Text(
+                        "Free Practice — ratings didn't update your schedule",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+        }
         
         Spacer(modifier = Modifier.height(48.dp))
         
         Button(
             onClick = onContinue,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = MaterialTheme.shapes.large
+            shape = MaterialTheme.shapes.large,
+            colors = if (isFreePractice)
+                ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary
+                )
+            else
+                ButtonDefaults.buttonColors()
         ) {
-            Text("Study More", style = MaterialTheme.typography.titleMedium)
+            Text("Practice Again", style = MaterialTheme.typography.titleMedium)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -514,31 +589,71 @@ fun NoFlashcardsStateExpressive(onNavigateBack: () -> Unit, onStudyAnyway: () ->
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            Icons.Rounded.History, 
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = MaterialTheme.colorScheme.outline
-        )
+        Surface(
+            modifier = Modifier.size(120.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.DoneAll,
+                    contentDescription = null,
+                    modifier = Modifier.size(60.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "Catch up complete",
+            text = "You're all caught up!",
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Your knowledge hive is in sync. No items require immediate review.",
+            text = "No flashcards are scheduled for review right now. Come back later — or jump into a free practice session below.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+        Spacer(modifier = Modifier.height(12.dp))
+        // Free practice info chip
+        Surface(
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            shape = MaterialTheme.shapes.large
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Text(
+                    "Free Practice won't change your study schedule",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(40.dp))
         Button(
             onClick = onStudyAnyway,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = MaterialTheme.shapes.large
+            shape = MaterialTheme.shapes.large,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.tertiary,
+                contentColor = MaterialTheme.colorScheme.onTertiary
+            )
         ) {
-            Text("Study Anyway")
+            Icon(Icons.Rounded.School, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Start Free Practice", style = MaterialTheme.typography.titleMedium)
         }
         Spacer(modifier = Modifier.height(12.dp))
         OutlinedButton(
@@ -546,7 +661,7 @@ fun NoFlashcardsStateExpressive(onNavigateBack: () -> Unit, onStudyAnyway: () ->
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = MaterialTheme.shapes.large
         ) {
-            Text("Return Home")
+            Text("Return Home", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
