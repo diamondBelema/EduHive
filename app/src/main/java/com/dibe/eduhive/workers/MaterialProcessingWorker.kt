@@ -1,9 +1,12 @@
 package com.dibe.eduhive.workers
 
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.dibe.eduhive.data.repository.ConceptExtractionProgress
@@ -40,6 +43,26 @@ class MaterialProcessingWorker @AssistedInject constructor(
         val hiveContext = inputData.getString(KEY_HIVE_CONTEXT) ?: ""
 
         val uri = Uri.parse(uriString)
+
+        // Promote to a foreground service immediately so the OS will not kill this
+        // worker when the app moves to the background during long AI processing.
+        val startNotification = NotificationHelper.getBaseNotification(
+            context, "Analyzing \"$title\"", "Starting..."
+        ).build()
+        try {
+            val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ForegroundInfo(
+                    NotificationHelper.NOTIFICATION_ID,
+                    startNotification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                ForegroundInfo(NotificationHelper.NOTIFICATION_ID, startNotification)
+            }
+            setForeground(foregroundInfo)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "setForeground failed, worker may be killed in background: ${e.message}")
+        }
 
         postNotification("Preparing \"$title\"", "Starting...", 0)
         aiDataSource.retainModelForPipeline()
@@ -130,8 +153,8 @@ class MaterialProcessingWorker @AssistedInject constructor(
             val totalConcepts = finalConcepts.size
             val failedConcepts = mutableListOf<String>()
 
-            finalConcepts.forEachIndexed { index, concept ->
-                if (isStopped) return@forEachIndexed
+            for ((index, concept) in finalConcepts.withIndex()) {
+                if (isStopped) return Result.failure(workDataOf(KEY_STATUS to "Cancelled", KEY_HIVE_ID to hiveId))
 
                 val conceptProgress = 50 + ((index.toFloat() / totalConcepts) * 45).toInt()
                 setProgress(workDataOf(

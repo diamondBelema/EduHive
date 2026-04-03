@@ -162,6 +162,11 @@ class AIDataSource @Inject constructor(
                     ensureModelLoaded(GenerationConfig.CONCEPT_EXTRACTION)
                 }
             }
+
+            // Report completion of this batch so the progress bar advances during extraction,
+            // not only at the start of the next one. This prevents the indicator from appearing
+            // stuck at 15% while a single large batch is being processed.
+            send(ConceptExtractionState.Progress((((index + 1).toFloat() / totalBatches) * 100).toInt()))
         }
 
         val uniqueConcepts = deduplicateConcepts(allExtractedConcepts)
