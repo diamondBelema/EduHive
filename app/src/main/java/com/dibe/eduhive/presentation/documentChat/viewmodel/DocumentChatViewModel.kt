@@ -19,7 +19,7 @@ class DocumentChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val hiveId: String = checkNotNull(savedStateHandle["hiveId"])
+    private val hiveId: String = savedStateHandle["hiveId"] ?: "ALL"
 
     private val _state = MutableStateFlow(DocumentChatState())
     val state: StateFlow<DocumentChatState> = _state.asStateFlow()

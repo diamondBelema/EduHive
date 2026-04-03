@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -120,74 +121,80 @@ fun QuizStudyScreen(
                     val question = questions[index]
                     val selectedAnswer = selectedByQuestionId[question.id]
                     val options = question.options ?: listOf("True", "False")
-                    
+
                     val isCorrect = selectedAnswer != null && isAnswerCorrect(selectedAnswer, question.correctAnswer)
 
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Progress
-                        LinearProgressIndicator(
-                            progress = { (index.toFloat() + 1) / questions.size },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(12.dp)
-                                .clip(CircleShape),
-                            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        // Progress bar with counter chip
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            LinearProgressIndicator(
+                                progress = { (index.toFloat() + 1) / questions.size },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(8.dp)
+                                    .clip(CircleShape),
+                                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = CircleShape
+                            ) {
+                                Text(
+                                    "${index + 1}/${questions.size}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
 
-                        // Scrollable content area
+                        // Scrollable content
                         Column(
                             modifier = Modifier
                                 .weight(1f)
                                 .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = question.question,
-                                    modifier = Modifier.padding(32.dp).fillMaxWidth(),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    lineHeight = 36.sp,
-                                    textAlign = TextAlign.Center
+                            // Question hero card with gradient accent
+                            QuestionHeroCard(questionText = question.question)
+
+                            // Options
+                            options.forEachIndexed { optIndex, optionText ->
+                                val letter = ('A' + optIndex).toString()
+                                val isOptionSelected = selectedAnswer == letter
+
+                                QuizOptionExpressive(
+                                    letter = letter,
+                                    text = optionText,
+                                    isSelected = isOptionSelected,
+                                    isCorrect = if (showFeedback) letter == question.correctAnswer.trim().uppercase() else null,
+                                    showFeedback = showFeedback,
+                                    onClick = {
+                                        if (!showFeedback) {
+                                            selectedByQuestionId[question.id] = letter
+                                            showFeedback = true
+                                            if (isAnswerCorrect(letter, question.correctAnswer)) {
+                                                correctCount++
+                                            }
+                                        }
+                                    }
                                 )
                             }
 
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                options.forEachIndexed { optIndex, optionText ->
-                                    val letter = ('A' + optIndex).toString()
-                                    val isOptionSelected = selectedAnswer == letter
-                                    
-                                    QuizOptionExpressive(
-                                        letter = letter,
-                                        text = optionText,
-                                        isSelected = isOptionSelected,
-                                        isCorrect = if (showFeedback) letter == question.correctAnswer.trim().uppercase() else null,
-                                        showFeedback = showFeedback,
-                                        onClick = { 
-                                            if (!showFeedback) {
-                                                selectedByQuestionId[question.id] = letter
-                                                showFeedback = true
-                                                if (isAnswerCorrect(letter, question.correctAnswer)) {
-                                                    correctCount++
-                                                }
-                                            }
-                                        }
-                                    )
-                                }
-                            }
+                            // Spacer so feedback panel doesn't overlap last option
+                            if (showFeedback) Spacer(Modifier.height(8.dp))
                         }
 
                         AnimatedVisibility(
@@ -213,6 +220,80 @@ fun QuizStudyScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuestionHeroCard(questionText: String) {
+    val infiniteTransition = rememberInfiniteTransition(label = "question_glow")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.08f,
+        targetValue = 0.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow"
+    )
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // Decorative glow blob
+            Box(
+                modifier = Modifier
+                    .size(180.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 40.dp, y = (-20).dp)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha),
+                                Color.Transparent
+                            )
+                        ),
+                        CircleShape
+                    )
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(28.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = CircleShape,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Quiz,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+
+                Text(
+                    text = questionText,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 30.sp,
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }

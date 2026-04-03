@@ -133,6 +133,8 @@ fun ConceptListScreen(
                         total = state.generationTotal,
                         currentConceptName = state.currentConceptName,
                         generationMode = state.generationMode,
+                        generatedFlashcardsCount = state.generatedFlashcards.size,
+                        generatedQuizCount = state.generatedQuizPairs.sumOf { it.second.size },
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
@@ -463,9 +465,10 @@ private fun GeneratingOverlay(
     total: Int,
     currentConceptName: String?,
     generationMode: GenerationMode?,
+    generatedFlashcardsCount: Int = 0,
+    generatedQuizCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
-    // Pulse animation for the glow ring
     val infiniteTransition = rememberInfiniteTransition(label = "glow")
     val glowAlpha by infiniteTransition.animateFloat(
         initialValue = 0.15f,
@@ -477,7 +480,6 @@ private fun GeneratingOverlay(
         label = "glowAlpha"
     )
 
-    // Smooth progress animation
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = tween(400, easing = FastOutSlowInEasing),
@@ -509,21 +511,17 @@ private fun GeneratingOverlay(
             contentAlignment = Alignment.Center,
             modifier = Modifier.size(140.dp)
         ) {
-            // Glow backdrop
             Surface(
                 modifier = Modifier.size(130.dp).clip(CircleShape),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = glowAlpha),
                 shape = CircleShape
             ) {}
-
-            // Track ring
             CircularProgressIndicator(
                 progress = { 1f },
                 modifier = Modifier.size(120.dp),
                 color = MaterialTheme.colorScheme.outlineVariant,
                 strokeWidth = 8.dp
             )
-            // Progress ring
             CircularProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier.size(120.dp),
@@ -532,7 +530,6 @@ private fun GeneratingOverlay(
                 strokeWidth = 8.dp,
                 strokeCap = StrokeCap.Round
             )
-            // Centre content
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     modeIcon,
@@ -562,7 +559,6 @@ private fun GeneratingOverlay(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Mode badge
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -590,10 +586,7 @@ private fun GeneratingOverlay(
                             )
                         }
                     }
-
                     Spacer(Modifier.weight(1f))
-
-                    // Animated dots to show activity
                     Text(
                         text = "Generating",
                         style = MaterialTheme.typography.labelSmall,
@@ -601,7 +594,6 @@ private fun GeneratingOverlay(
                     )
                 }
 
-                // Current concept name
                 AnimatedContent(
                     targetState = currentConceptName,
                     transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) },
@@ -640,7 +632,6 @@ private fun GeneratingOverlay(
                     }
                 }
 
-                // Status message
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodySmall,
@@ -649,7 +640,6 @@ private fun GeneratingOverlay(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Linear progress bar
                 LinearProgressIndicator(
                     progress = { animatedProgress },
                     modifier = Modifier
@@ -670,12 +660,87 @@ private fun GeneratingOverlay(
                 )
             }
         }
+
+        // Live summary badges — same card style as AddMaterial progress screen
+        AnimatedVisibility(
+            visible = generatedFlashcardsCount > 0 || generatedQuizCount > 0,
+            enter = slideInVertically { it / 2 } + fadeIn(tween(600))
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (generatedFlashcardsCount > 0) {
+                    GenerationSummaryBadge(
+                        label = "Flashcards",
+                        value = "$generatedFlashcardsCount",
+                        icon = Icons.Rounded.Style,
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (generatedQuizCount > 0) {
+                    GenerationSummaryBadge(
+                        label = "Quiz Q's",
+                        value = "$generatedQuizCount",
+                        icon = Icons.Rounded.Quiz,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // Empty state
 // ---------------------------------------------------------------------------
+
+@Composable
+private fun GenerationSummaryBadge(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = color,
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
 
 @Composable
 fun EmptyConceptsState(modifier: Modifier = Modifier) {

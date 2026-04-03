@@ -20,5 +20,12 @@ sealed class HiveListEvent {
     data class DeleteHive(val hiveId: String) : HiveListEvent()
     // Archive
     data class ArchiveHive(val hiveId: String) : HiveListEvent()
+    data class UnarchiveHive(val hiveId: String) : HiveListEvent()
+    object ShowArchiveSheet : HiveListEvent()
+    object HideArchiveSheet : HiveListEvent()
     object ClearError : HiveListEvent()
+    // Search
+    data class UpdateSearch(val query: String) : HiveListEvent()
+    object ToggleSearch : HiveListEvent()
+    object ClearSearch : HiveListEvent()
 }

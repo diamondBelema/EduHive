@@ -6,6 +6,7 @@ import com.dibe.eduhive.domain.usecase.hive.ArchiveHiveUseCase
 import com.dibe.eduhive.domain.usecase.hive.CreateHiveUseCase
 import com.dibe.eduhive.domain.usecase.hive.DeleteHiveUseCase
 import com.dibe.eduhive.domain.usecase.hive.EditHiveUseCase
+import com.dibe.eduhive.domain.usecase.hive.GetArchivedHivesUseCase
 import com.dibe.eduhive.domain.usecase.hive.GetHivesUseCase
 import com.dibe.eduhive.domain.usecase.hive.SelectHiveUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,7 +24,8 @@ class HiveListViewModel @Inject constructor(
     private val selectHiveUseCase: SelectHiveUseCase,
     private val editHiveUseCase: EditHiveUseCase,
     private val deleteHiveUseCase: DeleteHiveUseCase,
-    private val archiveHiveUseCase: ArchiveHiveUseCase
+    private val archiveHiveUseCase: ArchiveHiveUseCase,
+    private val getArchivedHivesUseCase: GetArchivedHivesUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HiveListState())
@@ -48,7 +50,15 @@ class HiveListViewModel @Inject constructor(
             is HiveListEvent.HideDeleteConfirm -> _state.update { it.copy(hiveToDelete = null) }
             is HiveListEvent.DeleteHive -> deleteHive(event.hiveId)
             is HiveListEvent.ArchiveHive -> archiveHive(event.hiveId)
+            is HiveListEvent.UnarchiveHive -> unarchiveHive(event.hiveId)
+            is HiveListEvent.ShowArchiveSheet -> loadArchivedHives()
+            is HiveListEvent.HideArchiveSheet -> _state.update { it.copy(showArchiveSheet = false) }
             is HiveListEvent.ClearError -> _state.update { it.copy(error = null) }
+            is HiveListEvent.UpdateSearch -> _state.update { it.copy(searchQuery = event.query) }
+            is HiveListEvent.ToggleSearch -> _state.update {
+                it.copy(isSearchActive = !it.isSearchActive, searchQuery = "")
+            }
+            is HiveListEvent.ClearSearch -> _state.update { it.copy(searchQuery = "", isSearchActive = false) }
         }
     }
 
@@ -61,6 +71,20 @@ class HiveListViewModel @Inject constructor(
                 },
                 onFailure = { error ->
                     _state.update { it.copy(isLoading = false, error = error.message ?: "Failed to load hives") }
+                }
+            )
+        }
+    }
+
+    private fun loadArchivedHives() {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingArchived = true, showArchiveSheet = true) }
+            getArchivedHivesUseCase().fold(
+                onSuccess = { hives ->
+                    _state.update { it.copy(archivedHives = hives, isLoadingArchived = false) }
+                },
+                onFailure = { error ->
+                    _state.update { it.copy(isLoadingArchived = false, error = error.message ?: "Failed to load archive") }
                 }
             )
         }
@@ -126,6 +150,20 @@ class HiveListViewModel @Inject constructor(
                 onSuccess = { loadHives() },
                 onFailure = { error ->
                     _state.update { it.copy(error = error.message ?: "Failed to archive hive") }
+                }
+            )
+        }
+    }
+
+    private fun unarchiveHive(hiveId: String) {
+        viewModelScope.launch {
+            archiveHiveUseCase(hiveId, archive = false).fold(
+                onSuccess = {
+                    loadHives()
+                    loadArchivedHives()
+                },
+                onFailure = { error ->
+                    _state.update { it.copy(error = error.message ?: "Failed to unarchive hive") }
                 }
             )
         }
