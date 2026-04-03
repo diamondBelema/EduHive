@@ -486,18 +486,19 @@ class AIDataSource @Inject constructor(
     }
 
     private fun parseGroundedAnswer(response: String): GroundedAnswer {
-        // Prompt ends with "ANSWER:" so the model continues inline.
+        // Prompt ends with "Answer:" so the model continues inline.
         // The full response IS the answer — just clean it up.
-        // Still try to find structured fields if the model happened to include them.
-        val lines = response.trim().lines()
-
+        // Still try to find an explicit "Answer:" or "ANSWER:" prefix if the model echoed it.
         val answerLine = response
             .lineSequence()
-            .firstOrNull { it.trim().startsWith("ANSWER:", ignoreCase = true) }
+            .firstOrNull {
+                it.trim().startsWith("ANSWER:", ignoreCase = true) ||
+                it.trim().startsWith("Answer:", ignoreCase = true)
+            }
             ?.substringAfter(":")
             ?.trim()
 
-        // If no structured ANSWER: line, the entire response is the answer
+        // If no structured answer prefix line, the entire response is the answer
         val answer = when {
             !answerLine.isNullOrBlank() -> answerLine
             response.isNotBlank() -> response.trim()
@@ -680,9 +681,10 @@ class AIDataSource @Inject constructor(
     private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
         val questions = mutableListOf<GeneratedQuizQuestion>()
         val seenTexts = mutableSetOf<String>()
+        // Exact or prefix matches for the osmosis format-example questions baked into the prompt.
         val exampleTexts = setOf(
-            "[question specific to",
-            "[true or false statement specific to"
+            "during osmosis, which direction does water move?",
+            "osmosis requires energy from the cell to move water molecules."
         )
 
         val blocks = response.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))

@@ -100,28 +100,28 @@ FRONT:""".trimIndent()
         }
 
         return """
-Generate $count quiz questions strictly about: $conceptName
+Generate $count quiz questions about: $conceptName
 $factsBlock
 
-Use ONLY the facts above. Output questions in this exact format:
+Output ONLY questions in this exact format. Do not repeat the examples.
 
 QUESTION 1
 TYPE: MCQ
-TEXT: [question specific to $conceptName]
-OPTION A: [answer]
-OPTION B: [answer]
-OPTION C: [answer]
-OPTION D: [answer]
-CORRECT: [A/B/C/D]
+TEXT: During osmosis, which direction does water move?
+OPTION A: From low solute concentration to high solute concentration
+OPTION B: From high solute concentration to low solute concentration
+OPTION C: Against the concentration gradient
+OPTION D: Only through active transport
+CORRECT: A
 
 QUESTION 2
 TYPE: TRUE_FALSE
-TEXT: [true or false statement specific to $conceptName]
+TEXT: Osmosis requires energy from the cell to move water molecules.
 OPTION A: True
 OPTION B: False
-CORRECT: [A or B]
+CORRECT: B
 
-GENERATE $count QUESTIONS ABOUT $conceptName:
+NOW GENERATE $count QUESTIONS ABOUT $conceptName:
 QUESTION 1
 TYPE:""".trimIndent()
     }
@@ -137,17 +137,16 @@ TYPE:""".trimIndent()
 
     fun groundedChat(question: String, contextChunks: List<GroundedContextChunk>): String {
         val chunkBlock = contextChunks.joinToString("\n\n") { chunk ->
-            "[${'$'}{chunk.index}] ${chunk.text}"
+            "[${chunk.index}] ${chunk.text}"
         }
 
         return """
-Answer this question using ONLY the text below.
-If the answer is in the text, give it directly. If not, say so.
+Use ONLY the numbered passages below to answer the question. Be direct and concise.
+If the answer is not in the passages, say "I don't have that information in your materials."
 
 $chunkBlock
 
 Question: $question
-
-ANSWER:""".trimIndent()
+Answer:""".trimIndent()
     }
 }
