@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
@@ -47,19 +48,20 @@ fun DocumentChatScreen(
         }
     }
 
+    // Scaffold is the best way to handle pinned top/bottom bars
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            shape = CircleShape,
+                            shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(32.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    Icons.Rounded.AutoAwesome,
+                                    Icons.Rounded.School,
                                     contentDescription = null,
                                     modifier = Modifier.size(20.dp),
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer
@@ -67,10 +69,12 @@ fun DocumentChatScreen(
                             }
                         }
                         Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Hive Tutor", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text("Grounded Intelligence", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        }
+                        Text(
+                            "Edu Hive Tutor",
+                            fontWeight = FontWeight.ExtraBold,
+                            style = MaterialTheme.typography.titleLarge,
+                            letterSpacing = (-0.5).sp
+                        )
                     }
                 },
                 navigationIcon = {
@@ -78,51 +82,54 @@ fun DocumentChatScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background
+                ),
+                windowInsets = WindowInsets.statusBars // Only status bar padding for top bar
             )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(MaterialTheme.colorScheme.background)
-        ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (state.messages.isEmpty()) {
-                    item {
-                        ChatHeroCard(
-                            onSuggestionClick = { viewModel.onEvent(DocumentChatEvent.UpdateInput(it)) }
-                        )
-                    }
-                }
-
-                items(state.messages) { message ->
-                    when (message) {
-                        is ChatMessage.User -> UserBubble(message.text)
-                        is ChatMessage.Assistant -> AssistantBubble(message.answer)
-                    }
-                }
-
-                if (state.isLoading) {
-                    item { AssistantTypingBubble() }
-                }
-            }
-
+        },
+        bottomBar = {
             ChatInputBar(
                 input = state.input,
                 isLoading = state.isLoading,
                 onInputChanged = { viewModel.onEvent(DocumentChatEvent.UpdateInput(it)) },
                 onSend = { viewModel.onEvent(DocumentChatEvent.SubmitQuestion) },
-                modifier = Modifier.navigationBarsPadding()
+                modifier = Modifier
+                    .navigationBarsPadding() // Sit on top of back button
+                    .imePadding() // Lift with keyboard
             )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { padding ->
+        // LazyColumn fills the remaining space between top and bottom bars
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (state.messages.isEmpty()) {
+                item {
+                    ChatHeroCard(
+                        onSuggestionClick = { viewModel.onEvent(DocumentChatEvent.UpdateInput(it)) }
+                    )
+                }
+            }
+
+            items(state.messages) { message ->
+                when (message) {
+                    is ChatMessage.User -> UserBubble(message.text)
+                    is ChatMessage.Assistant -> AssistantBubble(message.answer)
+                }
+            }
+
+            if (state.isLoading) {
+                item { AssistantTypingBubble() }
+            }
         }
     }
 }
@@ -134,55 +141,75 @@ private val chatSuggestions = listOf(
     "Quiz me"
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatHeroCard(onSuggestionClick: (String) -> Unit) {
-    Column(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .padding(vertical = 12.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            shape = CircleShape,
-            modifier = Modifier.size(80.dp)
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.SmartToy,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-        Text(
-            "Welcome to Hive Chat",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Black
-        )
-        Text(
-            "I'm your AI study partner. I use your hive documents to provide grounded answers.",
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 32.dp)
-        )
-
-        chatSuggestions.chunked(2).forEach { row ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = CircleShape,
+                modifier = Modifier.size(80.dp)
             ) {
-                row.forEach { suggestion ->
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "Your Personal AI Tutor",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "I process your study materials locally to help you master any subject with confidence.",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 24.sp
+            )
+
+            Spacer(Modifier.height(32.dp))
+            
+            Text(
+                "Try asking:",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            
+            Spacer(Modifier.height(16.dp))
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                maxItemsInEachRow = 2
+            ) {
+                chatSuggestions.forEach { suggestion ->
                     SuggestionChip(
                         onClick = { onSuggestionClick(suggestion) },
                         label = { Text(suggestion) },
                         colors = SuggestionChipDefaults.suggestionChipColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
+                        ),
+                        shape = CircleShape
                     )
                 }
             }
@@ -197,14 +224,15 @@ private fun UserBubble(text: String) {
         contentAlignment = Alignment.CenterEnd
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp),
+            shape = RoundedCornerShape(24.dp, 24.dp, 4.dp, 24.dp),
             color = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
+            shadowElevation = 1.dp
         ) {
             Text(
                 text = text,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.bodyMedium
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                style = MaterialTheme.typography.bodyLarge
             )
         }
     }
@@ -217,39 +245,46 @@ private fun AssistantBubble(answer: com.dibe.eduhive.domain.usecase.chat.Documen
         horizontalAlignment = Alignment.Start
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
+            shape = RoundedCornerShape(24.dp, 24.dp, 24.dp, 4.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.widthIn(max = 320.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = answer.answer,
-                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                    style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp),
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
 
         if (answer.citations.isNotEmpty()) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.padding(start = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 answer.citations.take(3).forEach { citation ->
                     Surface(
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.height(28.dp)
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.height(32.dp)
                     ) {
-                        Text(
-                            text = citation.materialTitle,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            Icon(Icons.Rounded.Description, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = citation.materialTitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -260,11 +295,11 @@ private fun AssistantBubble(answer: com.dibe.eduhive.domain.usecase.chat.Documen
 @Composable
 private fun AssistantTypingBubble() {
     Surface(
-        shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
+        shape = RoundedCornerShape(24.dp, 24.dp, 24.dp, 4.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -281,7 +316,7 @@ private fun AssistantTypingBubble() {
             }
             alphas.forEach { alpha ->
                 Box(
-                    modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha.value))
+                    modifier = Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha.value))
                 )
             }
         }
@@ -298,10 +333,13 @@ private fun ChatInputBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.background,
+        tonalElevation = 0.dp
     ) {
         Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
@@ -309,27 +347,45 @@ private fun ChatInputBar(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
-                TextField(
-                    value = input,
-                    onValueChange = onInputChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Ask Hive Tutor...") },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                    ),
-                    maxLines = 4
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.weight(1f).padding(vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+                        if (input.isEmpty()) {
+                            Text(
+                                "Message Hive Tutor...",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                        BasicTextField(
+                            value = input,
+                            onValueChange = onInputChanged,
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            maxLines = 5
+                        )
+                    }
+                }
             }
             Spacer(Modifier.width(8.dp))
             IconButton(
                 onClick = onSend,
                 enabled = input.isNotBlank() && !isLoading,
-                modifier = Modifier.clip(CircleShape).background(if (input.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant).size(48.dp)
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(if (input.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Icon(Icons.AutoMirrored.Rounded.Send, null, tint = if (input.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    Icons.AutoMirrored.Rounded.Send, 
+                    null, 
+                    tint = if (input.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }
