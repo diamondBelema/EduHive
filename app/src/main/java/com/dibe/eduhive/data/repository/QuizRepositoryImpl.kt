@@ -23,6 +23,14 @@ class QuizRepositoryImpl @Inject constructor(
     private val aiDataSource: AIDataSource
 ) : QuizRepository {
 
+    companion object {
+        /** Fallback question count used when a concept has no flashcard facts yet. */
+        private const val MIN_QUESTION_COUNT_NO_FACTS = 3
+
+        /** Upper bound on requested questions to stay within the model's token budget. */
+        private const val MAX_QUESTION_COUNT = 8
+    }
+
     override suspend fun createQuiz(quiz: Quiz, questions: List<QuizQuestion>) {
         localDataSource.insert(QuizEntity.fromDomain(quiz))
         val questionEntities = questions.map { QuizQuestionEntity.fromDomain(it) }
@@ -74,8 +82,8 @@ class QuizRepositoryImpl @Inject constructor(
         val facts = flashcards
             .map { "Q: ${it.front} | A: ${it.back}" }
 
-        // Increase question count to be more comprehensive
-        val effectiveCount = if (facts.isEmpty()) 2 else (facts.size + 1).coerceAtMost(5)
+        // Use the requested count, but fall back to MIN_QUESTION_COUNT_NO_FACTS when no facts are available
+        val effectiveCount = if (facts.isEmpty()) minOf(questionCount, MIN_QUESTION_COUNT_NO_FACTS) else questionCount.coerceAtMost(MAX_QUESTION_COUNT)
 
         // Create quiz entity
         val quizId = UUID.randomUUID().toString()
