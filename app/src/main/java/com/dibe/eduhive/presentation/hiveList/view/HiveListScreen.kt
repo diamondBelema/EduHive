@@ -5,6 +5,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +24,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -33,7 +37,7 @@ import com.dibe.eduhive.domain.model.Hive
 import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListEvent
 import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun HiveListScreen(
     viewModel: HiveListViewModel = hiltViewModel(),
@@ -53,111 +57,112 @@ fun HiveListScreen(
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // App Header with branding
-        Surface(
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 0.dp
-        ) {
-            Column(modifier = Modifier.statusBarsPadding()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Rounded.School,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            "Edu Hive",
-                            fontWeight = FontWeight.ExtraBold,
-                            style = MaterialTheme.typography.titleLarge,
-                            letterSpacing = (-0.5).sp
-                        )
-                    }
-                    
-                    IconButton(onClick = { viewModel.onEvent(HiveListEvent.ShowArchiveSheet) }) {
-                        Icon(Icons.Rounded.Inventory2, contentDescription = "Archive", modifier = Modifier.size(24.dp))
-                    }
-                }
-                
-                // Persistent Search Widget
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .height(56.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // App Header with expressive branding
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                tonalElevation = 0.dp
+            ) {
+                Column(modifier = Modifier.statusBarsPadding()) {
                     Row(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxWidth()
+                            .padding(start = 24.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                            if (state.searchQuery.isEmpty()) {
-                                Text(
-                                    "Search your study hives...",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                )
-                            }
-                            BasicTextField(
-                                value = state.searchQuery,
-                                onValueChange = { viewModel.onEvent(HiveListEvent.UpdateSearch(it)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                singleLine = true
+                        Column {
+                            Text(
+                                "Edu Hive",
+                                fontWeight = FontWeight.Black,
+                                style = MaterialTheme.typography.displaySmall,
+                                letterSpacing = (-2).sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Your Intelligence Hub",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
                             )
                         }
-                        if (state.searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { viewModel.onEvent(HiveListEvent.UpdateSearch("")) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.Close,
-                                    null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        
+                        IconButton(
+                            onClick = { viewModel.onEvent(HiveListEvent.ShowArchiveSheet) },
+                            colors = IconButtonDefaults.filledTonalIconButtonColors()
+                        ) {
+                            Icon(Icons.Rounded.Inventory2, contentDescription = "Archive")
+                        }
+                    }
+                    
+                    // Expressive Persistent Search Widget
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 12.dp)
+                            .height(64.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, 
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                                if (state.searchQuery.isEmpty()) {
+                                    Text(
+                                        "Search your hives...",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    )
+                                }
+                                BasicTextField(
+                                    value = state.searchQuery,
+                                    onValueChange = { viewModel.onEvent(HiveListEvent.UpdateSearch(it)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    singleLine = true
                                 )
+                            }
+                            if (state.searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { viewModel.onEvent(HiveListEvent.UpdateSearch("")) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        Box(modifier = Modifier.weight(1f)) {
+            // Hive List with Bouncy Entry
             val displayHives = state.filteredHives
             when {
                 state.isLoading && state.hives.isEmpty() -> {
@@ -180,8 +185,8 @@ fun HiveListScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(displayHives, key = { it.id }) { hive ->
                             HiveCardExpressive(
@@ -192,26 +197,28 @@ fun HiveListScreen(
                                 onDelete = { viewModel.onEvent(HiveListEvent.ShowDeleteConfirm(hive)) }
                             )
                         }
-                        item { Spacer(Modifier.height(88.dp)) }
+                        item { Spacer(Modifier.height(100.dp)) }
                     }
                 }
             }
-
-            ExtendedFloatingActionButton(
-                onClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) },
-                expanded = isFabExpanded,
-                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                text = { Text("Create Hive", fontWeight = FontWeight.Bold) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = CircleShape,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            )
         }
+
+        // Expressive Floating Action Button
+        ExtendedFloatingActionButton(
+            onClick = { viewModel.onEvent(HiveListEvent.ShowCreateDialog) },
+            expanded = isFabExpanded,
+            icon = { Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(28.dp)) },
+            text = { Text("New Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) },
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            shape = RoundedCornerShape(24.dp), // Expressive Pill
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 24.dp, end = 24.dp)
+        )
     }
 
+    // Sheets & Dialogs (unchanged logic, just ensuring consistency)
     if (state.showCreateDialog) {
         CreateHiveBottomSheet(
             onDismiss = { viewModel.onEvent(HiveListEvent.HideCreateDialog) },
@@ -249,7 +256,7 @@ fun HiveListScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun HiveCardExpressive(
     hive: Hive,
@@ -259,68 +266,98 @@ fun HiveCardExpressive(
     onDelete: () -> Unit
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "card_scale"
+    )
 
     Surface(
         onClick = onClick,
-        shape = MaterialTheme.shapes.extraLarge,
+        interactionSource = interactionSource,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 32.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, 
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        )
     ) {
         Column(
-            modifier = Modifier.padding(20.dp)
+            modifier = Modifier.padding(24.dp)
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(48.dp)
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.size(56.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.AutoAwesome, 
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
                 
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(20.dp))
                 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         hive.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        "Active • ${formatLastAccessed(hive.lastAccessedAt)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        shape = CircleShape
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Outlined.AccessTime, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "Updated ${formatLastAccessed(hive.lastAccessedAt)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
-                Box {
-                    IconButton(onClick = { showContextMenu = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                IconButton(
+                    onClick = { showContextMenu = true },
+                    modifier = Modifier.offset(x = 8.dp, y = (-8).dp)
+                ) {
+                    Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     DropdownMenu(
                         expanded = showContextMenu,
                         onDismissRequest = { showContextMenu = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Edit") },
+                            text = { Text("Edit Hive") },
                             leadingIcon = { Icon(Icons.Rounded.Edit, null) },
                             onClick = { onEdit(); showContextMenu = false }
                         )
                         DropdownMenuItem(
-                            text = { Text("Archive") },
+                            text = { Text("Archive Hive") },
                             leadingIcon = { Icon(Icons.Rounded.Archive, null) },
                             onClick = { onArchive(); showContextMenu = false }
                         )
@@ -335,13 +372,13 @@ fun HiveCardExpressive(
             }
 
             if (!hive.description.isNullOrBlank()) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(16.dp))
                 Text(
                     hive.description,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 20.sp,
-                    maxLines = 2,
+                    lineHeight = 24.sp,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -356,15 +393,23 @@ fun NoSearchResults(query: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            Icons.Rounded.SearchOff,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-        )
+        Surface(
+            modifier = Modifier.size(120.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.SearchOff,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
         Spacer(Modifier.height(24.dp))
         Text(
-            "No Results Found",
+            "No Matches Found",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Black
         )
@@ -387,49 +432,50 @@ fun EmptyHivesState(onCreateClick: () -> Unit) {
     ) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
-            shape = CircleShape,
-            modifier = Modifier.size(120.dp)
+            shape = RoundedCornerShape(40.dp),
+            modifier = Modifier.size(160.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Rounded.AutoAwesome, 
                     contentDescription = null, 
-                    modifier = Modifier.size(60.dp),
+                    modifier = Modifier.size(80.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
         }
         
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(40.dp))
         
         Text(
-            "Welcome to Edu Hive",
-            style = MaterialTheme.typography.headlineMedium,
+            "Begin Your Journey",
+            style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            letterSpacing = (-1).sp
         )
         
         Spacer(Modifier.height(16.dp))
         
         Text(
-            "Create your first study hive to transform your documents into on-device intelligence.",
+            "Create your first Knowledge Hive to start processing your materials into structured intelligence.",
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 24.sp
+            lineHeight = 26.sp
         )
         
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(56.dp))
         
         Button(
             onClick = onCreateClick,
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-            shape = MaterialTheme.shapes.extraLarge,
+            modifier = Modifier.fillMaxWidth().height(72.dp),
+            shape = RoundedCornerShape(24.dp),
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
         ) {
-            Icon(Icons.Rounded.Add, null)
+            Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(12.dp))
-            Text("Initialize Your First Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Initialize Hive", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -445,7 +491,7 @@ fun ArchivedHivesSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
     ) {
         Column(
             modifier = Modifier
@@ -455,7 +501,7 @@ fun ArchivedHivesSheet(
         ) {
             Text(
                 "Archived Hives",
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Black
             )
             Spacer(Modifier.height(24.dp))
@@ -469,25 +515,29 @@ fun ArchivedHivesSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(archivedHives) { hive ->
                         Surface(
-                            shape = MaterialTheme.shapes.large,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(16.dp),
+                                modifier = Modifier.padding(20.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(hive.name, fontWeight = FontWeight.Bold)
+                                    Text(hive.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                                     Text(
                                         "Archived ${formatLastAccessed(hive.lastAccessedAt)}",
                                         style = MaterialTheme.typography.labelSmall
                                     )
                                 }
-                                FilledTonalButton(onClick = { onUnarchive(hive.id) }) {
+                                Button(
+                                    onClick = { onUnarchive(hive.id) },
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
                                     Text("Restore")
                                 }
                             }
@@ -510,51 +560,58 @@ fun CreateHiveBottomSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 32.dp)
                 .padding(bottom = 64.dp)
         ) {
             Text(
-                "New Hive",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Black
+                "Initialize New Hive",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-1).sp
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Define the scope for your new intelligence core.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(40.dp))
 
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Hive Name") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
+                shape = RoundedCornerShape(20.dp),
                 singleLine = true
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("Focus (e.g. Exam prep, project)") },
+                label = { Text("Focus or Description") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
+                shape = RoundedCornerShape(20.dp),
                 minLines = 3
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(48.dp))
 
             Button(
                 onClick = { onCreate(name, description.ifBlank { null }) },
                 enabled = name.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(64.dp),
-                shape = MaterialTheme.shapes.extraLarge
+                modifier = Modifier.fillMaxWidth().height(72.dp),
+                shape = RoundedCornerShape(24.dp)
             ) {
-                Text("Establish Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Establish Hive", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -572,51 +629,52 @@ fun EditHiveBottomSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 32.dp)
                 .padding(bottom = 64.dp)
         ) {
             Text(
-                "Edit Hive",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black
+                "Refine Hive",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-1).sp
             )
             
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(40.dp))
 
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Hive Name") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
+                shape = RoundedCornerShape(20.dp),
                 singleLine = true
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
                 label = { Text("Description") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
+                shape = RoundedCornerShape(20.dp),
                 minLines = 3
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(48.dp))
 
             Button(
                 onClick = { onSave(name, description.ifBlank { null }) },
                 enabled = name.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(64.dp),
-                shape = MaterialTheme.shapes.extraLarge
+                modifier = Modifier.fillMaxWidth().height(72.dp),
+                shape = RoundedCornerShape(24.dp)
             ) {
-                Text("Update Hive", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Update Intelligence", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -630,19 +688,21 @@ fun DeleteHiveDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete Hive?") },
-        text = { Text("This will permanently remove \"${hive.name}\" and all knowledge. This action is irreversible.") },
+        title = { Text("Decommission Hive?", fontWeight = FontWeight.Black) },
+        text = { Text("This will permanently remove \"${hive.name}\" and all generated knowledge. This action is irreversible.") },
         confirmButton = {
             Button(
                 onClick = { onConfirm(); onDismiss() },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                shape = CircleShape
             ) {
-                Text("Delete")
+                Text("Decommission")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        },
+        shape = RoundedCornerShape(32.dp)
     )
 }
 
