@@ -34,9 +34,11 @@ class AskHiveQuestionUseCase @Inject constructor(
             return@withContext Result.failure(IllegalArgumentException("Ask a question first"))
         }
 
-        val processedMaterials = materialRepository
-            .getMaterialsForHive(hiveId)
-            .filter { it.processed }
+        val processedMaterials = if (hiveId == "ALL") {
+            materialRepository.getAllProcessedMaterials()
+        } else {
+            materialRepository.getMaterialsForHive(hiveId).filter { it.processed }
+        }
 
         if (processedMaterials.isEmpty()) {
             return@withContext Result.failure(

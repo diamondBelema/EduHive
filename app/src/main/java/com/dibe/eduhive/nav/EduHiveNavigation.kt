@@ -99,6 +99,15 @@ fun EduHiveNavigation(
             HiveListScreen(
                 onHiveSelected = { hiveId ->
                     navController.navigate(Screen.HiveDashboard.createRoute(hiveId))
+                },
+                onStudyAll = {
+                    navController.navigate(Screen.FlashcardStudy.createRoute("ALL"))
+                },
+                onQuizAll = {
+                    navController.navigate(Screen.QuizStudy.createRoute("ALL"))
+                },
+                onChatAll = {
+                    navController.navigate(Screen.HiveChat.createRoute("ALL"))
                 }
             )
         }

@@ -25,6 +25,7 @@ class FlashcardStudyViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val hiveId: String = checkNotNull(savedStateHandle["hiveId"])
+    private val isAllHives: Boolean get() = hiveId == "ALL"
 
     private val _state = MutableStateFlow(FlashcardStudyState())
     val state: StateFlow<FlashcardStudyState> = _state.asStateFlow()
@@ -56,7 +57,7 @@ class FlashcardStudyViewModel @Inject constructor(
             _state.update { it.copy(isLoading = true, isFreePractice = false) }
 
             getNextReviewItemsUseCase(
-                hiveId = hiveId,
+                hiveId = if (isAllHives) null else hiveId,
                 limit = 20,
                 allowContinueWhenNoDue = false
             ).fold(
@@ -87,7 +88,7 @@ class FlashcardStudyViewModel @Inject constructor(
     }
 
     /**
-     * Free-practice mode: loads ALL flashcards for the hive without any scheduling
+     * Free-practice mode: loads ALL flashcards for the hive (or all hives) without scheduling
      * constraint. Ratings in this mode only move through the deck — they do NOT update
      * Leitner boxes or Bayesian confidence, preserving the algorithm's state.
      */
@@ -95,10 +96,14 @@ class FlashcardStudyViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val allCards = flashcardRepository.getStudyFallbackFlashcards(
-                    hiveId = hiveId,
-                    limit = 100
-                )
+                val allCards = if (isAllHives) {
+                    flashcardRepository.getAllFlashcardsForStudy(limit = 100)
+                } else {
+                    flashcardRepository.getStudyFallbackFlashcards(
+                        hiveId = hiveId,
+                        limit = 100
+                    )
+                }
                 _state.update {
                     it.copy(
                         flashcards = allCards,

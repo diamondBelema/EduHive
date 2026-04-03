@@ -31,7 +31,10 @@ import com.dibe.eduhive.presentation.hiveList.viewmodel.HiveListViewModel
 @Composable
 fun HiveListScreen(
     viewModel: HiveListViewModel = hiltViewModel(),
-    onHiveSelected: (String) -> Unit
+    onHiveSelected: (String) -> Unit,
+    onStudyAll: () -> Unit = {},
+    onQuizAll: () -> Unit = {},
+    onChatAll: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -104,6 +107,28 @@ fun HiveListScreen(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(onClick = onStudyAll, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Study All")
+                                }
+                                OutlinedButton(onClick = onQuizAll, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.Quiz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Quiz All")
+                                }
+                                OutlinedButton(onClick = onChatAll, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Chat All")
+                                }
+                            }
+                        }
                         items(state.hives, key = { it.id }) { hive ->
                             HiveCardExpressive(
                                 hive = hive,
