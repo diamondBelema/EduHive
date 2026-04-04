@@ -63,9 +63,17 @@ class DocumentChatViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
+                    val userFacingMessage = when {
+                        error.message?.contains("re-imported", ignoreCase = true) == true ->
+                            error.message!! // actionable stale-URI message, show as-is
+                        error.message?.contains("No processed documents", ignoreCase = true) == true ->
+                            "No processed documents found in this hive yet. Add a document first."
+                        else ->
+                            "I couldn't fully answer from your materials yet. Try rephrasing the question or import clearer docs."
+                    }
                     val fallbackAnswer = DocumentChatAnswer(
                         question = question,
-                        answer = "I couldn't fully answer from your materials yet. Try rephrasing the question or import clearer docs.",
+                        answer = userFacingMessage,
                         citations = emptyList(),
                         isGrounded = false,
                         warning = error.message ?: "Unable to answer right now"
@@ -100,4 +108,3 @@ sealed class ChatMessage {
     data class User(val text: String) : ChatMessage()
     data class Assistant(val answer: DocumentChatAnswer) : ChatMessage()
 }
-

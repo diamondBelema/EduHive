@@ -47,11 +47,19 @@ class AskHiveQuestionUseCase @Inject constructor(
         }
 
         val rankedChunks = mutableListOf<RankedChunk>()
+        var unreadableCount = 0
 
         processedMaterials.forEach { material ->
             val extractedPages = runCatching {
                 fileDataSource.extractTextPages(Uri.parse(material.localPath)).getOrThrow()
-            }.getOrElse { emptyList() }
+            }.getOrElse { error ->
+                android.util.Log.e(
+                    "AskHiveQuestion",
+                    "Failed to read material '${material.title}' (${material.localPath}): ${error.message}"
+                )
+                unreadableCount++
+                emptyList()
+            }
 
             var runningChunkIndex = 0
             extractedPages.forEach { page ->
@@ -76,9 +84,15 @@ class AskHiveQuestionUseCase @Inject constructor(
         }
 
         if (rankedChunks.isEmpty()) {
-            return@withContext Result.failure(
-                IllegalStateException("I could not read any text from your processed documents")
-            )
+            val errorMsg = if (unreadableCount > 0 && unreadableCount == processedMaterials.size) {
+                // All materials failed to read — almost certainly a stale URI permission issue
+                // (documents imported before persistent permissions were taken)
+                "Your documents need to be re-imported before chat can work. " +
+                        "Please delete and re-add your materials to enable the tutor."
+            } else {
+                "I could not read any text from your processed documents"
+            }
+            return@withContext Result.failure(IllegalStateException(errorMsg))
         }
 
         // Filter and sort chunks

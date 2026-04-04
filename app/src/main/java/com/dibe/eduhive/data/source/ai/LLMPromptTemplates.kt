@@ -139,17 +139,16 @@ TYPE:""".trimIndent()
 
     fun groundedChat(question: String, contextChunks: List<GroundedContextChunk>): String {
         val chunkBlock = contextChunks.joinToString("\n\n") { chunk ->
-            "[${'$'}{chunk.index}] ${chunk.text}"
+            "[${chunk.index}] ${chunk.text}"
         }
 
-        return """
-Answer this question using ONLY the text below.
-If the answer is in the text, give it directly. If not, say so.
+        return """Use only the text below to answer. Be concise.
 
 $chunkBlock
 
-Question: $question
-
+Q: $question
+CITATIONS: [list chunk numbers used, or NONE]
+CONFIDENCE: [HIGH, MEDIUM, or LOW]
 ANSWER:""".trimIndent()
     }
 }

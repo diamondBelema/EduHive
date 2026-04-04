@@ -63,6 +63,17 @@ class FileDataSource @Inject constructor(
      */
     suspend fun extractTextPages(uri: Uri): Result<List<String>> {
         return try {
+            // Persist read permission so this URI stays accessible after the
+            // picker session ends (required for chat/re-reads after processing).
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) {
+                // URI is not persistable (e.g. file:// or already persisted) — safe to ignore.
+            }
+
             val mimeType = context.contentResolver.getType(uri) ?: ""
 
             val rawPages: List<String> = when {
