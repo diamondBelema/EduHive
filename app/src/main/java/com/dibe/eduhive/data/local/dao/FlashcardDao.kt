@@ -14,19 +14,22 @@ interface FlashcardDao {
     @Query("""
         SELECT * FROM flashcards 
         WHERE leitnerBox <= :maxBox 
-        ORDER BY lastSeenAt ASC
+          AND (nextReviewAt IS NULL OR nextReviewAt <= :now)
+        ORDER BY leitnerBox ASC, nextReviewAt ASC
     """)
-    suspend fun getDue(maxBox: Int): List<FlashcardEntity>
+    suspend fun getDue(maxBox: Int, now: Long): List<FlashcardEntity>
 
     @Query(
         """
         SELECT f.* FROM flashcards f
         INNER JOIN concepts c ON c.conceptId = f.conceptId
-        WHERE c.hiveId = :hiveId AND f.leitnerBox <= :maxBox
-        ORDER BY f.lastSeenAt ASC
+        WHERE c.hiveId = :hiveId
+          AND f.leitnerBox <= :maxBox
+          AND (f.nextReviewAt IS NULL OR f.nextReviewAt <= :now)
+        ORDER BY f.leitnerBox ASC, f.nextReviewAt ASC
         """
     )
-    suspend fun getDueForHive(hiveId: String, maxBox: Int): List<FlashcardEntity>
+    suspend fun getDueForHive(hiveId: String, maxBox: Int, now: Long): List<FlashcardEntity>
 
     @Query(
         """
@@ -40,10 +43,10 @@ interface FlashcardDao {
 
     @Query("""
         UPDATE flashcards 
-        SET leitnerBox = :box, lastSeenAt = :time 
+        SET leitnerBox = :box, lastSeenAt = :lastSeenAt, nextReviewAt = :nextReviewAt
         WHERE flashcardId = :id
     """)
-    suspend fun updateLeitner(id: String, box: Int, time: Long)
+    suspend fun updateLeitner(id: String, box: Int, lastSeenAt: Long, nextReviewAt: Long)
 
     @Query("SELECT * FROM flashcards WHERE conceptId = :conceptId")
     suspend fun getForConcept(conceptId: String): List<FlashcardEntity>

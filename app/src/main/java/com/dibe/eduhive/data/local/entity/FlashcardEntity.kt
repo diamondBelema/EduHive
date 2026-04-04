@@ -10,8 +10,9 @@ import com.dibe.eduhive.domain.model.Flashcard
     tableName = "flashcards",
     indices = [
         Index("conceptId"),
-        Index("lastSeenAt"),  // ← New
-        Index("leitnerBox")   // ← New
+        Index("lastSeenAt"),
+        Index("leitnerBox"),
+        Index("nextReviewAt")   // ← enables efficient due-card queries
     ]
 )
 data class FlashcardEntity(
@@ -21,7 +22,8 @@ data class FlashcardEntity(
     val back: String,
     val difficulty: Int,
     val leitnerBox: Int,
-    val lastSeenAt: Long?
+    val lastSeenAt: Long?,
+    val nextReviewAt: Long?     // ← persisted; null = never reviewed (always due)
 ) {
     fun toDomain() = Flashcard(
         id = flashcardId,
@@ -30,7 +32,7 @@ data class FlashcardEntity(
         back = back,
         currentBox = leitnerBox,
         lastSeenAt = lastSeenAt,
-        nextReviewAt = calculateNextReview(leitnerBox, lastSeenAt)
+        nextReviewAt = nextReviewAt
     )
 
     companion object {
@@ -39,26 +41,10 @@ data class FlashcardEntity(
             conceptId = flashcard.conceptId,
             front = flashcard.front,
             back = flashcard.back,
-            difficulty = 1,  // Default difficulty
+            difficulty = 1,
             leitnerBox = flashcard.currentBox,
-            lastSeenAt = flashcard.lastSeenAt
+            lastSeenAt = flashcard.lastSeenAt,
+            nextReviewAt = flashcard.nextReviewAt
         )
     }
 }
-
-// Helper for calculating next review time
-private fun calculateNextReview(box: Int, lastSeen: Long?): Long? {
-    if (lastSeen == null) return null
-
-    val daysToAdd = when (box) {
-        1 -> 1L
-        2 -> 3L
-        3 -> 7L
-        4 -> 14L
-        5 -> 30L
-        else -> 1L
-    }
-
-    return lastSeen + (daysToAdd * 24L * 60L * 60L * 1000L)
-}
-

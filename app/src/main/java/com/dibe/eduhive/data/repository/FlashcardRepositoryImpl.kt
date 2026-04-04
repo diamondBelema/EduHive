@@ -31,10 +31,11 @@ class FlashcardRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getDueFlashcards(maxBox: Int, limit: Int, hiveId: String?): List<Flashcard> {
+        val now = System.currentTimeMillis()
         val due = if (hiveId.isNullOrBlank()) {
-            localDataSource.getDue(maxBox)
+            localDataSource.getDue(maxBox, now)
         } else {
-            localDataSource.getDueForHive(hiveId, maxBox)
+            localDataSource.getDueForHive(hiveId, maxBox, now)
         }
         return due.take(limit).map { it.toDomain() }
     }
@@ -60,7 +61,8 @@ class FlashcardRepositoryImpl @Inject constructor(
         localDataSource.updateLeitner(
             id = flashcardId,
             box = newBox.coerceIn(1, 5),
-            time = lastSeenAt
+            lastSeenAt = lastSeenAt,
+            nextReviewAt = nextReviewAt
         )
     }
 

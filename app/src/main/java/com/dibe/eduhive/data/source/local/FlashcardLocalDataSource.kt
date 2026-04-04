@@ -20,11 +20,11 @@ class FlashcardLocalDataSource @Inject constructor(
     suspend fun getForConcept(conceptId: String) =
         flashcardDao.getForConcept(conceptId)
 
-    suspend fun getDue(maxBox: Int) =
-        flashcardDao.getDue(maxBox)
+    suspend fun getDue(maxBox: Int, now: Long) =
+        flashcardDao.getDue(maxBox, now)
 
-    suspend fun getDueForHive(hiveId: String, maxBox: Int) =
-        flashcardDao.getDueForHive(hiveId, maxBox)
+    suspend fun getDueForHive(hiveId: String, maxBox: Int, now: Long) =
+        flashcardDao.getDueForHive(hiveId, maxBox, now)
 
     suspend fun getAllForHiveStudy(hiveId: String) =
         flashcardDao.getAllForHiveStudy(hiveId)
@@ -32,8 +32,8 @@ class FlashcardLocalDataSource @Inject constructor(
     suspend fun getAllForStudy() =
         flashcardDao.getAllForStudy()
 
-    suspend fun updateLeitner(id: String, box: Int, time: Long) =
-        flashcardDao.updateLeitner(id, box, time)
+    suspend fun updateLeitner(id: String, box: Int, lastSeenAt: Long, nextReviewAt: Long) =
+        flashcardDao.updateLeitner(id, box, lastSeenAt, nextReviewAt)
 
     suspend fun deleteById(flashcardId: String) =
         flashcardDao.deleteById(flashcardId)

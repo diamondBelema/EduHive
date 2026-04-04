@@ -27,7 +27,8 @@ object DatabaseModule {
         )
             .addMigrations(
                 EduHiveDatabase.MIGRATION_1_2,
-                EduHiveDatabase.MIGRATION_2_3
+                EduHiveDatabase.MIGRATION_2_3,
+                EduHiveDatabase.MIGRATION_3_4
             )
             .fallbackToDestructiveMigration()
             .build()

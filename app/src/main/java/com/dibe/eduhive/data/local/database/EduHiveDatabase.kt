@@ -18,7 +18,7 @@ import com.dibe.eduhive.data.local.entity.*
         QuizQuestionEntity::class,
         ReviewEventEntity::class
     ],
-    version = 3
+    version = 4
 )
 @TypeConverters(EnumConverters::class)
 abstract class EduHiveDatabase : RoomDatabase() {
@@ -45,6 +45,19 @@ abstract class EduHiveDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE hives ADD COLUMN iconName TEXT NOT NULL DEFAULT 'School'"
+                )
+            }
+        }
+
+        /**
+         * Add nextReviewAt column to flashcards table.
+         * NULL = card has never been reviewed → always considered due.
+         * Existing cards get NULL so they immediately surface for review.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE flashcards ADD COLUMN nextReviewAt INTEGER DEFAULT NULL"
                 )
             }
         }
