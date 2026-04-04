@@ -58,25 +58,34 @@ class QuizStudyViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isSubmitting = true) }
 
-            // Build a lookup from quizId -> conceptId using the loaded quiz pairs.
-            // question.quizId is the quiz's ID, not the concept's ID.
-            // We need the concept's ID to update confidence in the learning engine.
+            // Group questions by conceptId so we can perform one aggregated
+            // Bayesian update per concept rather than N compounding updates.
             val quizIdToConceptId = state.value.quizPairs
                 .associate { (quiz, _) -> quiz.id to quiz.conceptId }
 
-            val questions = state.value.quizPairs.flatMap { it.second }
+            // Build QuizQuestionResult list per conceptId
+            val resultsByConceptId = mutableMapOf<String, MutableList<QuizQuestionResult>>()
 
-            questions.forEach { question ->
+            state.value.quizPairs.flatMap { it.second }.forEach { question ->
                 val selected = results[question.id] ?: return@forEach
                 val isCorrect = isAnswerCorrect(selected, question.correctAnswer)
                 val duration = System.currentTimeMillis() - (startTimeMap[question.id] ?: System.currentTimeMillis())
                 val conceptId = quizIdToConceptId[question.quizId] ?: return@forEach
 
-                submitQuizResultUseCase(
+                resultsByConceptId
+                    .getOrPut(conceptId) { mutableListOf() }
+                    .add(QuizQuestionResult(
+                        questionId = question.id,
+                        wasCorrect = isCorrect,
+                        responseTimeMs = duration
+                    ))
+            }
+
+            // One submitMultiple call per concept = one calibrated Bayesian update
+            resultsByConceptId.forEach { (conceptId, conceptResults) ->
+                submitQuizResultUseCase.submitMultiple(
                     conceptId = conceptId,
-                    questionId = question.id,
-                    wasCorrect = isCorrect,
-                    responseTimeMs = duration
+                    results = conceptResults
                 )
             }
 

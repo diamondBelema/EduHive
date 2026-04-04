@@ -93,33 +93,47 @@ FRONT:""".trimIndent()
         facts: List<String>,
         count: Int
     ): String {
-        val factsBlock = if (facts.isNotEmpty()) {
-            "Facts:\n" + facts.mapIndexed { i, f -> "${i + 1}. $f" }.joinToString("\n")
+        // Reformat facts from "Q: x | A: y" into plain statements so the model
+        // does not pattern-match Q/A style and default to True/False answers.
+        val knowledgeBlock = if (facts.isNotEmpty()) {
+            val statements = facts.map { fact ->
+                val parts = fact.split("|")
+                if (parts.size == 2) parts[1].removePrefix("A:").removePrefix(" A:").trim()
+                else fact.trim()
+            }
+            buildString {
+                appendLine("Key facts about $conceptName:")
+                statements.forEach { s -> appendLine("- $s") }
+            }.trimEnd()
         } else {
-            "Context: $conceptDescription"
+            "Topic: $conceptName\nDescription: $conceptDescription"
         }
 
         return """
-Generate $count MCQ quiz questions about: $conceptName
-$factsBlock
+$knowledgeBlock
 
-Rules:
-- Every question MUST be TYPE: MCQ with exactly 4 options (A, B, C, D).
-- Options must be real, distinct answer choices — NEVER "True" or "False".
-- CORRECT must be A, B, C, or D.
-- Base every question on the facts above.
+Write $count multiple-choice questions about $conceptName.
+Each question must have 4 answer options (A, B, C, D) — no True/False.
 
-Format:
 QUESTION 1
 TYPE: MCQ
-TEXT: [question]
-OPTION A: [choice]
-OPTION B: [choice]
-OPTION C: [choice]
-OPTION D: [choice]
-CORRECT: [A, B, C or D]
+TEXT: [ask about one of the facts above]
+OPTION A: [wrong answer]
+OPTION B: [correct answer]
+OPTION C: [wrong answer]
+OPTION D: [wrong answer]
+CORRECT: B
 
-GENERATE $count QUESTIONS NOW:
+QUESTION 2
+TYPE: MCQ
+TEXT: [ask about a different fact]
+OPTION A: [correct answer]
+OPTION B: [wrong answer]
+OPTION C: [wrong answer]
+OPTION D: [wrong answer]
+CORRECT: A
+
+Now write $count questions about $conceptName:
 QUESTION 1
 TYPE: MCQ
 TEXT:""".trimIndent()

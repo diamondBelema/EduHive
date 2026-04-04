@@ -61,7 +61,7 @@ class AIDataSource @Inject constructor(
         /**
          * Max flashcard facts to inject into a quiz prompt.
          */
-        private const val MAX_FACTS_PER_QUIZ = 5
+        private const val MAX_FACTS_PER_QUIZ = 3
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -683,10 +683,21 @@ class AIDataSource @Inject constructor(
     private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
         val questions = mutableListOf<GeneratedQuizQuestion>()
         val seenTexts = mutableSetOf<String>()
-        val exampleTexts = setOf(
-            "[question specific to",
-            "[true or false statement specific to"
+
+        // Texts that indicate the model echoed an example rather than generating real content
+        val placeholderPatterns = listOf(
+            Regex("""^\[.*]$"""),                          // entire text is [placeholder]
+            Regex("""^ask about (one of|a different)"""),  // echoed our prompt instructions
+            Regex("""^question (specific to|about)""")
         )
+
+        // Options that are clearly placeholder text echoed from the prompt format example
+        fun isPlaceholderOption(opt: String): Boolean {
+            val l = opt.trim().lowercase()
+            return l.startsWith("[") || l.endsWith("]") ||
+                    l.contains("wrong answer") || l.contains("correct answer") ||
+                    l.contains("choice") || l.contains("option")
+        }
 
         val blocks = response.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))
 
@@ -704,35 +715,34 @@ class AIDataSource @Inject constructor(
                     trimmed.startsWith("TEXT:",    ignoreCase = true) -> text    = trimmed.substringAfter(":").trim()
                     trimmed.startsWith("OPTION",   ignoreCase = true) -> {
                         val opt = trimmed.substringAfter(":", "").trim()
-                        if (opt.isNotEmpty()) options.add(opt)
+                        if (opt.isNotEmpty() && !isPlaceholderOption(opt)) options.add(opt)
                     }
                     trimmed.startsWith("CORRECT:", ignoreCase = true) -> correct = trimmed.substringAfter(":").trim()
                 }
             }
 
+            // Skip blank or placeholder question text
             if (text.isBlank()) continue
             val lowerText = text.trim().lowercase()
-            if (lowerText in exampleTexts) continue
-            if (exampleTexts.any { lowerText.startsWith(it) }) continue
-            if (Regex("""^\[.*]$""").matches(lowerText)) continue
-            val key = lowerText
-            if (key in seenTexts) continue
-            seenTexts.add(key)
+            if (placeholderPatterns.any { it.containsMatchIn(lowerText) }) continue
+            if (lowerText in seenTexts) continue
+            seenTexts.add(lowerText)
 
-            // If the model generated MCQ but filled every option with True/False variants,
-            // reclassify as TRUE_FALSE (2-option) and deduplicate.
-            val trueFalseOptions = setOf("true", "false")
-            val allOptionsTrueFalse = options.isNotEmpty() &&
-                    options.all { it.trim().lowercase() in trueFalseOptions }
-            if (type.equals("MCQ", ignoreCase = true) && allOptionsTrueFalse) {
+            // Reclassify MCQ→TRUE_FALSE if model only produced True/False options despite the prompt
+            val trueFalseValues = setOf("true", "false")
+            val allTrueFalse = options.isNotEmpty() &&
+                    options.all { it.trim().lowercase() in trueFalseValues }
+            if (type.equals("MCQ", ignoreCase = true) && allTrueFalse) {
                 type = "TRUE_FALSE"
-                // Keep only the canonical True/False pair
-                val dedupedOptions = mutableListOf<String>()
-                if (options.any { it.trim().lowercase() == "true" }) dedupedOptions.add("True")
-                if (options.any { it.trim().lowercase() == "false" }) dedupedOptions.add("False")
+                val deduped = mutableListOf<String>()
+                if (options.any { it.trim().lowercase() == "true" }) deduped.add("True")
+                if (options.any { it.trim().lowercase() == "false" }) deduped.add("False")
                 options.clear()
-                options.addAll(dedupedOptions)
+                options.addAll(deduped)
             }
+
+            // Discard MCQ questions that ended up with fewer than 2 real options after filtering
+            if (type.equals("MCQ", ignoreCase = true) && options.size < 2) continue
 
             val normalizedCorrect = normalizeCorrectAnswer(correct, options)
             questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, normalizedCorrect))
