@@ -5,28 +5,22 @@ package com.dibe.eduhive.data.source.ai
  */
 object LLMPromptTemplates {
 
-    val KNOWN_EXAMPLE_CONCEPT_NAMES = setOf(
-        "muscle hypertrophy",
-        "osmosis"
-    )
+    val KNOWN_EXAMPLE_CONCEPT_NAMES = emptySet<String>()
 
     // ── Concept extraction ────────────────────────────────────────────────────
 
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-${contextLine}Extract as many specific, testable concepts as you can find in the text below.
-Output only pairs of CONCEPT and DESCRIPTION lines. No other text.
-Each DESCRIPTION must be one or more complete sentence explaining what the concept means.
+${contextLine}Read the text below and extract key concepts from it.
+For every concept found, output exactly two lines:
+CONCEPT: [name of the concept]
+DESCRIPTION: [one complete sentence explaining what it means]
+Output only those lines. Do not copy this instruction. Do not invent concepts not in the text.
 
 Text:
 $text
 
-Output:
-CONCEPT: Muscle hypertrophy
-DESCRIPTION: Increase in muscle fiber size caused by progressive resistance training over time.
-CONCEPT: Osmosis
-DESCRIPTION: Passive diffusion of water molecules across a selectively permeable membrane down a concentration gradient.
 CONCEPT:""".trimIndent()
     }
 
@@ -35,20 +29,15 @@ CONCEPT:""".trimIndent()
 
     fun flashcardDraft(conceptName: String, conceptDescription: String, count: Int): String {
         return """
-Create $count flashcards for the concept: $conceptName
-Definition: $conceptDescription
-
-Output only FRONT and BACK pairs. No other text.
-FRONT must be a specific question about $conceptName.
-BACK must be a real, complete answer — not a placeholder.
-
-CONCEPT: Osmosis
-FRONT: Why does a cell placed in a hypertonic solution shrink?
-BACK: Water moves out of the cell by osmosis because the external solution has a higher solute concentration, creating a concentration gradient.
-FRONT: What happens when osmosis is disrupted by a damaged membrane?
-BACK: The cell loses the ability to regulate water balance, causing it to either swell and burst or shrink depending on the environment.
+Create $count flashcards for the concept below.
+For each flashcard output exactly two lines:
+FRONT: [specific question about the concept]
+BACK: [complete answer — not a placeholder]
+Output only FRONT and BACK lines. Do not copy this instruction.
 
 CONCEPT: $conceptName
+Definition: $conceptDescription
+
 FRONT:""".trimIndent()
     }
 
@@ -59,17 +48,18 @@ FRONT:""".trimIndent()
 
         return """
 Generate $countPerConcept flashcards for each concept below.
+Output only CONCEPT, FRONT, and BACK lines. Do not copy this instruction.
 
 $conceptsBlock
 
-CONCEPT: [Number]
-FRONT: [Question]
-BACK: [Answer]
-
 Rules:
-- Keep FRONT specific to that concept; never generic.
-- One unique angle per card (mechanism, contrast, application, failure case).
-- No markdown, no bullet lists, no extra labels.""".trimIndent()
+- CONCEPT: must be the concept number (1, 2, 3...).
+- FRONT: specific question about that concept only.
+- BACK: complete answer, one unique angle per card.
+- No markdown, no bullet lists, no extra labels.
+
+CONCEPT: 1
+FRONT:""".trimIndent()
     }
 
     fun flashcardRefinement(draftFlashcards: List<GeneratedFlashcard>): String {
@@ -114,26 +104,16 @@ $knowledgeBlock
 
 Write $count multiple-choice questions about $conceptName.
 Each question must have 4 answer options (A, B, C, D) — no True/False.
-
-QUESTION 1
+Format (do not copy this):
+QUESTION [n]
 TYPE: MCQ
-TEXT: [ask about one of the facts above]
-OPTION A: [wrong answer]
-OPTION B: [correct answer]
-OPTION C: [wrong answer]
-OPTION D: [wrong answer]
-CORRECT: B
+TEXT: [question about $conceptName]
+OPTION A: [option]
+OPTION B: [option]
+OPTION C: [option]
+OPTION D: [option]
+CORRECT: [A/B/C/D]
 
-QUESTION 2
-TYPE: MCQ
-TEXT: [ask about a different fact]
-OPTION A: [correct answer]
-OPTION B: [wrong answer]
-OPTION C: [wrong answer]
-OPTION D: [wrong answer]
-CORRECT: A
-
-Now write $count questions about $conceptName:
 QUESTION 1
 TYPE: MCQ
 TEXT:""".trimIndent()
