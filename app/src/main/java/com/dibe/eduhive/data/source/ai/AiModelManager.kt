@@ -34,22 +34,27 @@ class AIModelManager @Inject constructor(
     companion object {
         const val TAG = "AIModelManager"
 
-        const val MODEL_GEMMA4_2B = "gemma4-2b"
-        const val MODEL_GEMMA3_1B = "gemma3-1b"
+        const val MODEL_GEMMA4_2B  = "gemma4-2b"
+        const val MODEL_GEMMA3_1B  = "gemma3-1b"
         const val MODEL_GEMMA3_270M = "gemma3-270m"
-        const val MODEL_QWEN = "Qwen2.5-0.5B"
-        const val MODEL_SMOLLM_135M = "SmolLM-135M"
+        const val MODEL_QWEN       = "qwen2-5-0b5"   // safe filename: no dots or uppercase
+        const val MODEL_SMOLLM_135M = "smollm-135m"  // safe filename: no uppercase
 
-        private const val GEMMA4_2B_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task?download=true"
-        private const val GEMMA3_1B_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-1b-it-int4.task?download=true"
-        private const val QWEN_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
+        // Gemma4-2B: no public Android-compatible .task exists yet — hidden from UI
+        private const val GEMMA4_2B_URL = ""
+        private const val GEMMA3_1B_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_block128_ekv1280.task?download=true"
+        private const val QWEN_URL      = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
-        private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q4_0-web.task?download=true"
+        // Gemma3-270M: official litert-community Android-compatible q8.task
+        private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q8.task?download=true"
+
+        // Max time to wait for a download before declaring failure (15 minutes)
+        private const val DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000L
 
 
         /**
          * Maximum input characters allowed.
-         * 3500 chars is roughly 800-900 tokens, which fits comfortably 
+         * 3500 chars is roughly 800-900 tokens, which fits comfortably
          * in the 1280 token window while leaving room for output.
          */
         const val MAX_INPUT_CHARS = 3500
@@ -125,7 +130,7 @@ class AIModelManager @Inject constructor(
         val totalRamMB = memInfo.totalMem / (1024L * 1024L)
 
         return when {
-            totalRamMB >= 6000 -> getModelInfo(MODEL_GEMMA4_2B)
+            // Gemma4-2B removed: no Android-compatible .task available yet
             totalRamMB >= 4000 -> getModelInfo(MODEL_GEMMA3_1B)
             totalRamMB >= 3000 -> getModelInfo(MODEL_QWEN)
             totalRamMB >= 2000 -> getModelInfo(MODEL_GEMMA3_270M)
@@ -138,8 +143,8 @@ class AIModelManager @Inject constructor(
             getModelInfo(MODEL_SMOLLM_135M),
             getModelInfo(MODEL_GEMMA3_270M),
             getModelInfo(MODEL_QWEN),
-            getModelInfo(MODEL_GEMMA3_1B),
-            getModelInfo(MODEL_GEMMA4_2B)
+            getModelInfo(MODEL_GEMMA3_1B)
+            // Gemma4-2B excluded: no Android-compatible .task file available yet
         )
     }
 
@@ -157,41 +162,97 @@ class AIModelManager @Inject constructor(
                 return@flow
             }
 
+            // Validate network connectivity before attempting download
+            val connectivityManager = context.getSystemService(android.net.ConnectivityManager::class.java)
+            val activeNetwork = connectivityManager?.activeNetwork
+            if (activeNetwork == null) {
+                emit(ModelDownloadProgress.Failed("No internet connection available"))
+                return@flow
+            }
+
             val downloadId = downloader.downloadFile(
                 url = modelInfo.url,
                 name = "${modelId}.task",
                 allowMobileData = allowMobileData
             )
+
+            // Validate downloadId before proceeding
+            if (downloadId <= 0L) {
+                emit(ModelDownloadProgress.Failed("Failed to register download with system. Check storage permissions and available space."))
+                return@flow
+            }
+
             emit(ModelDownloadProgress.Registered(downloadId.toString()))
 
             var downloading = true
+            val startTime = System.currentTimeMillis()
+
             while (downloading) {
+                // Global timeout — prevents infinite loop if DownloadManager gets stuck
+                if (System.currentTimeMillis() - startTime > DOWNLOAD_TIMEOUT_MS) {
+                    downloadManager?.remove(downloadId)
+                    emit(ModelDownloadProgress.Failed("Download timed out after 15 minutes"))
+                    break
+                }
+
                 val query = DownloadManager.Query().setFilterById(downloadId)
                 val cursor: Cursor? = downloadManager?.query(query)
-                if (cursor != null && cursor.moveToFirst()) {
-                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    val bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                    val bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
 
-                    when (status) {
-                        DownloadManager.STATUS_RUNNING -> {
-                            val progress = if (bytesTotal > 0) ((bytesDownloaded * 100) / bytesTotal).toInt() else 0
-                            emit(ModelDownloadProgress.Downloading(progress, bytesTotal, bytesDownloaded))
+                if (cursor != null && cursor.moveToFirst()) {
+                    try {
+                        val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                        val bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                        val bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                        val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+
+                        when (status) {
+                            DownloadManager.STATUS_RUNNING -> {
+                                val progress = if (bytesTotal > 0) ((bytesDownloaded * 100) / bytesTotal).toInt() else 0
+                                emit(ModelDownloadProgress.Downloading(progress, bytesTotal, bytesDownloaded))
+                            }
+                            DownloadManager.STATUS_PENDING -> {
+                                // Queued but not started yet — emit 0% and keep waiting
+                                emit(ModelDownloadProgress.Downloading(0, 0L, 0L))
+                            }
+                            DownloadManager.STATUS_PAUSED -> {
+                                // Network dropped or waiting for WiFi — surface a message, keep polling
+                                val pauseReason = when (reason) {
+                                    DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Waiting for network..."
+                                    DownloadManager.PAUSED_QUEUED_FOR_WIFI    -> "Waiting for WiFi..."
+                                    else -> "Download paused"
+                                }
+                                emit(ModelDownloadProgress.Paused(pauseReason, bytesDownloaded, bytesTotal))
+                            }
+                            DownloadManager.STATUS_SUCCESSFUL -> {
+                                downloading = false
+                                modelPreferences.setModelDownloaded(modelId, true)
+                                modelPreferences.setActiveModel(modelId)
+                                emit(ModelDownloadProgress.Complete(modelId))
+                            }
+                            DownloadManager.STATUS_FAILED -> {
+                                downloading = false
+                                val errorMsg = when (reason) {
+                                    DownloadManager.ERROR_INSUFFICIENT_SPACE   -> "Not enough storage space"
+                                    DownloadManager.ERROR_FILE_ALREADY_EXISTS  -> "File conflict — clear Downloads and retry"
+                                    DownloadManager.ERROR_CANNOT_RESUME        -> "Download cannot be resumed — please retry"
+                                    DownloadManager.ERROR_HTTP_DATA_ERROR      -> "Network error — check your connection"
+                                    else -> "Download failed (code $reason)"
+                                }
+                                emit(ModelDownloadProgress.Failed(errorMsg))
+                            }
+                            else -> {
+                                // Unknown status — keep polling
+                            }
                         }
-                        DownloadManager.STATUS_SUCCESSFUL -> {
-                            downloading = false
-                            modelPreferences.setModelDownloaded(modelId, true)
-                            modelPreferences.setActiveModel(modelId)
-                            emit(ModelDownloadProgress.Complete(modelId))
-                        }
-                        DownloadManager.STATUS_FAILED -> {
-                            downloading = false
-                            emit(ModelDownloadProgress.Failed("Download failed"))
-                        }
+                    } catch (e: IllegalArgumentException) {
+                        // Handle missing columns on certain Android versions gracefully
+                        Log.e(TAG, "Download query column missing (device-specific issue)", e)
+                        emit(ModelDownloadProgress.Failed("Download status unavailable on this device. Please retry."))
+                        downloading = false
                     }
                 } else {
                     downloading = false
-                    emit(ModelDownloadProgress.Failed("Download task not found"))
+                    emit(ModelDownloadProgress.Failed("Download task not found in system queue"))
                 }
                 cursor?.close()
                 if (downloading) delay(1000)
@@ -422,6 +483,8 @@ sealed class ModelDownloadProgress {
         val totalMB: Float get() = totalBytes / (1024f * 1024f)
         val downloadedMB: Float get() = downloadedBytes / (1024f * 1024f)
     }
+    /** Download is paused by DownloadManager (no network / waiting for WiFi). */
+    data class Paused(val reason: String, val downloadedBytes: Long, val totalBytes: Long) : ModelDownloadProgress()
     data class Complete(val modelId: String) : ModelDownloadProgress()
     data class Failed(val error: String) : ModelDownloadProgress()
 }

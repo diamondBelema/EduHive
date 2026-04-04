@@ -113,6 +113,11 @@ class SettingsViewModel @Inject constructor(
                         is ModelDownloadProgress.Complete -> {
                             _state.update { it.copy(downloadStatus = "Download complete. Activating model...") }
                         }
+                        is ModelDownloadProgress.Paused -> {
+                            _state.update {
+                                it.copy(downloadStatus = progress.reason)
+                            }
+                        }
                         is ModelDownloadProgress.Failed -> {
                             downloadFailed = true
                             _state.update {

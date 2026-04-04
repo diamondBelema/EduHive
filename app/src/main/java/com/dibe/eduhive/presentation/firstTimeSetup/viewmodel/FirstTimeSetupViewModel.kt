@@ -148,6 +148,19 @@ class FirstTimeSetupViewModel @Inject constructor(
                         )
                     }
 
+                    is ModelDownloadProgress.Paused -> {
+                        _state.update {
+                            it.copy(
+                                downloadStatus = progress.reason,
+                                // Keep current progress — download will resume automatically
+                                downloadProgress = if (progress.totalBytes > 0)
+                                    progress.downloadedBytes.toFloat() / progress.totalBytes.toFloat()
+                                else
+                                    _state.value.downloadProgress
+                            )
+                        }
+                    }
+
                     is ModelDownloadProgress.Failed -> {
                         _state.update {
                             it.copy(
