@@ -3,6 +3,7 @@ package com.dibe.eduhive.presentation.conceptList.view
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,14 +15,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.dibe.eduhive.domain.model.Concept
+import com.dibe.eduhive.presentation.addMaterial.view.SummaryBadgeExpressive
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListEvent
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListState
 import com.dibe.eduhive.presentation.conceptList.viewmodel.ConceptListViewModel
@@ -54,7 +63,8 @@ fun ConceptListScreen(
                         targetState = state.isSelectionActive,
                         transitionSpec = {
                             fadeIn() togetherWith fadeOut()
-                        }
+                        },
+                        label = "title_animation"
                     ) { isSelecting ->
                         if (isSelecting) {
                             Text(
@@ -69,7 +79,8 @@ fun ConceptListScreen(
                 navigationIcon = {
                     AnimatedContent(
                         targetState = state.isSelectionActive,
-                        transitionSpec = { fadeIn() togetherWith fadeOut() }
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "nav_animation"
                     ) { isSelecting ->
                         if (isSelecting) {
                             IconButton(onClick = { viewModel.onEvent(ConceptListEvent.ClearSelection) }) {
@@ -100,7 +111,7 @@ fun ConceptListScreen(
         bottomBar = {
             // Animated selection action bar
             AnimatedVisibility(
-                visible = state.isSelectionActive,
+                visible = state.isSelectionActive && !state.isGenerating,
                 enter = slideInVertically { it } + fadeIn(
                     animationSpec = spring(stiffness = Spring.StiffnessMedium)
                 ),
@@ -109,7 +120,6 @@ fun ConceptListScreen(
                 GenerationActionBar(
                     selectedCount = state.selectedCount,
                     isGenerating = state.isGenerating,
-                    generationProgress = state.generationProgress,
                     onGenerate = { mode -> viewModel.onEvent(ConceptListEvent.Generate(mode)) }
                 )
             }
@@ -122,20 +132,18 @@ fun ConceptListScreen(
         ) {
             when {
                 state.isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(strokeWidth = 3.dp)
+                    }
                 }
 
                 state.isGenerating -> {
-                    GeneratingOverlay(
-                        message = state.generationProgress ?: "Generating...",
+                    GeneratingStateExpressive(
+                        status = state.generationProgress ?: "Initializing...",
                         progress = state.generationProgressFloat,
-                        completed = state.generationCompleted,
-                        total = state.generationTotal,
                         currentConceptName = state.currentConceptName,
-                        generationMode = state.generationMode,
-                        generatedFlashcardsCount = state.generatedFlashcards.size,
-                        generatedQuizCount = state.generatedQuizPairs.sumOf { it.second.size },
-                        modifier = Modifier.align(Alignment.Center)
+                        flashcardsCount = state.generatedFlashcards.size,
+                        quizCount = state.generatedQuizPairs.sumOf { it.second.size }
                     )
                 }
 
@@ -196,6 +204,191 @@ fun ConceptListScreen(
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer
                     ) { Text(it) }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generating State — Expressive UI mirroring AddMaterial
+// ---------------------------------------------------------------------------
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun GeneratingStateExpressive(
+    status: String,
+    progress: Float,
+    currentConceptName: String?,
+    flashcardsCount: Int,
+    quizCount: Int
+) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = spring(stiffness = Spring.StiffnessVeryLow),
+        label = "progress"
+    )
+
+    val infiniteTransition = rememberInfiniteTransition(label = "gen_expressive")
+
+    // Pulse scale for central icon
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    // Glowing colors
+    val glowColor by infiniteTransition.animateColor(
+        initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+        targetValue = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow_color"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            // Soft background glow
+            Box(
+                modifier = Modifier
+                    .size(280.dp)
+                    .blur(40.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(glowColor, Color.Transparent),
+                        ),
+                        CircleShape
+                    )
+            )
+
+            val density = LocalDensity.current
+            val strokeWidthPx = with(density) { 14.dp.toPx() }
+
+            // The Expressive Squiggly Indicator
+            CircularWavyProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier.size(240.dp),
+                stroke = Stroke(
+                    width = strokeWidthPx,
+                    cap = StrokeCap.Round,
+                    miter = 20f
+                ),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.primary,
+                gapSize = 0.dp,
+                wavelength = 40.dp
+            )
+
+            // Central Content
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.scale(pulseScale)
+            ) {
+                Text(
+                    text = "${(animatedProgress * 100).toInt()}%",
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Building Hive",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // Status Pill
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.9f),
+            shape = CircleShape,
+            tonalElevation = 4.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.5.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // Concept Name Overlay
+        AnimatedContent(
+            targetState = currentConceptName,
+            transitionSpec = { fadeIn() + slideInVertically() togetherWith fadeOut() },
+            label = "concept_label"
+        ) { name ->
+            if (name != null) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 16.dp).fillMaxWidth(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                Spacer(Modifier.height(32.dp))
+            }
+        }
+
+        // Summary Badges Section — Match AddMaterial style
+        AnimatedVisibility(
+            visible = flashcardsCount > 0 || quizCount > 0,
+            enter = slideInVertically { it / 2 } + fadeIn(tween(800)),
+            modifier = Modifier.padding(top = 32.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (flashcardsCount > 0) {
+                    SummaryBadgeExpressive(
+                        label = "Flashcards",
+                        value = "$flashcardsCount",
+                        icon = Icons.Rounded.Style,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (quizCount > 0) {
+                    SummaryBadgeExpressive(
+                        label = "Quiz Q's",
+                        value = "$quizCount",
+                        icon = Icons.Rounded.Quiz,
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
@@ -357,7 +550,6 @@ fun SelectableConceptCard(
 private fun GenerationActionBar(
     selectedCount: Int,
     isGenerating: Boolean,
-    generationProgress: String?,
     onGenerate: (GenerationMode) -> Unit
 ) {
     Surface(
@@ -454,293 +646,8 @@ private fun GenerateChip(
 }
 
 // ---------------------------------------------------------------------------
-// Generating overlay — expressive card mirroring the AddMaterial style
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun GeneratingOverlay(
-    message: String,
-    progress: Float,
-    completed: Int,
-    total: Int,
-    currentConceptName: String?,
-    generationMode: GenerationMode?,
-    generatedFlashcardsCount: Int = 0,
-    generatedQuizCount: Int = 0,
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "glow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 0.4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowAlpha"
-    )
-
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress,
-        animationSpec = tween(400, easing = FastOutSlowInEasing),
-        label = "progress"
-    )
-
-    val modeLabel = when (generationMode) {
-        GenerationMode.FLASHCARDS -> "Flashcards"
-        GenerationMode.QUIZ -> "Quiz Questions"
-        GenerationMode.BOTH -> "Flashcards & Quiz"
-        null -> "Content"
-    }
-    val modeIcon = when (generationMode) {
-        GenerationMode.FLASHCARDS -> Icons.Rounded.Style
-        GenerationMode.QUIZ -> Icons.Rounded.Quiz
-        GenerationMode.BOTH -> Icons.Rounded.AutoAwesome
-        null -> Icons.Rounded.AutoAwesome
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        // Glowing progress ring
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.size(140.dp)
-        ) {
-            Surface(
-                modifier = Modifier.size(130.dp).clip(CircleShape),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = glowAlpha),
-                shape = CircleShape
-            ) {}
-            CircularProgressIndicator(
-                progress = { 1f },
-                modifier = Modifier.size(120.dp),
-                color = MaterialTheme.colorScheme.outlineVariant,
-                strokeWidth = 8.dp
-            )
-            CircularProgressIndicator(
-                progress = { animatedProgress },
-                modifier = Modifier.size(120.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                strokeWidth = 8.dp,
-                strokeCap = StrokeCap.Round
-            )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    modeIcon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = if (total > 0) "$completed/$total" else "…",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-
-        // Info card
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.extraLarge,
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = MaterialTheme.shapes.small
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                modeIcon,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                modeLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        text = "Generating",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                AnimatedContent(
-                    targetState = currentConceptName,
-                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) },
-                    label = "conceptName"
-                ) { name ->
-                    if (name != null) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                            shape = MaterialTheme.shapes.large
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.LightbulbCircle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.secondary
-                                )
-                                Text(
-                                    text = name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    } else {
-                        Box(Modifier.fillMaxWidth().height(40.dp))
-                    }
-                }
-
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                LinearProgressIndicator(
-                    progress = { animatedProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(CircleShape),
-                    strokeCap = StrokeCap.Round,
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-
-                Text(
-                    text = if (total > 0) "${(animatedProgress * 100).toInt()}% complete" else "Preparing…",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.End
-                )
-            }
-        }
-
-        // Live summary badges — same card style as AddMaterial progress screen
-        AnimatedVisibility(
-            visible = generatedFlashcardsCount > 0 || generatedQuizCount > 0,
-            enter = slideInVertically { it / 2 } + fadeIn(tween(600))
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (generatedFlashcardsCount > 0) {
-                    GenerationSummaryBadge(
-                        label = "Flashcards",
-                        value = "$generatedFlashcardsCount",
-                        icon = Icons.Rounded.Style,
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                if (generatedQuizCount > 0) {
-                    GenerationSummaryBadge(
-                        label = "Quiz Q's",
-                        value = "$generatedQuizCount",
-                        icon = Icons.Rounded.Quiz,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Empty state
 // ---------------------------------------------------------------------------
-
-@Composable
-private fun GenerationSummaryBadge(
-    label: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    color: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = color,
-        shape = MaterialTheme.shapes.extraLarge,
-        modifier = modifier
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.Start
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                value,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black
-            )
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
-        }
-    }
-}
 
 @Composable
 fun EmptyConceptsState(modifier: Modifier = Modifier) {

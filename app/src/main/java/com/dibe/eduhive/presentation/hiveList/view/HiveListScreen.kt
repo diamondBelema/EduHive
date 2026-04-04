@@ -124,8 +124,8 @@ fun HiveListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 12.dp)
-                            .height(48.dp), // Shorter
-                        shape = CircleShape, // Fully rounded
+                            .height(48.dp),
+                        shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp, 
