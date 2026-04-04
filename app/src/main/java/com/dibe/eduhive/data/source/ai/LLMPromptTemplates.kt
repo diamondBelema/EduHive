@@ -100,32 +100,29 @@ FRONT:""".trimIndent()
         }
 
         return """
-Generate $count quiz questions strictly about: $conceptName
+Generate $count MCQ quiz questions about: $conceptName
 $factsBlock
 
-Use ONLY the facts above. Write real questions and real answer options — do NOT copy the format labels or use placeholder text.
+Rules:
+- Every question MUST be TYPE: MCQ with exactly 4 options (A, B, C, D).
+- Options must be real, distinct answer choices — NEVER "True" or "False".
+- CORRECT must be A, B, C, or D.
+- Base every question on the facts above.
 
-Output questions in this exact format (replace the example text with real content about $conceptName):
-
+Format:
 QUESTION 1
 TYPE: MCQ
-TEXT: What is the primary function of $conceptName?
-OPTION A: First possible answer
-OPTION B: Second possible answer
-OPTION C: Third possible answer
-OPTION D: Fourth possible answer
-CORRECT: A
+TEXT: [question]
+OPTION A: [choice]
+OPTION B: [choice]
+OPTION C: [choice]
+OPTION D: [choice]
+CORRECT: [A, B, C or D]
 
-QUESTION 2
-TYPE: TRUE_FALSE
-TEXT: $conceptName is responsible for a specific process described in the facts.
-OPTION A: True
-OPTION B: False
-CORRECT: A
-
-GENERATE $count QUESTIONS ABOUT $conceptName:
+GENERATE $count QUESTIONS NOW:
 QUESTION 1
-TYPE:""".trimIndent()
+TYPE: MCQ
+TEXT:""".trimIndent()
     }
 
     fun mutate(basePrompt: String, attempt: Int): String {

@@ -402,33 +402,42 @@ fun RatingSectionExpressive(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                // Space between buttons
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Apply weight(1f) to every button to distribute width evenly
+                val buttonModifier = Modifier.weight(1f)
+
                 ExpressiveRatingButton(
+                    modifier = buttonModifier,
                     icon = Icons.Rounded.Close,
                     label = "Forgot",
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 ) { onRate(ConfidenceLevel.UNKNOWN) }
-                
+
                 ExpressiveRatingButton(
+                    modifier = buttonModifier,
                     icon = Icons.Rounded.SentimentDissatisfied,
                     label = "Struggled",
                     containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
                 ) { onRate(ConfidenceLevel.KNOWN_LITTLE) }
 
                 ExpressiveRatingButton(
+                    modifier = buttonModifier,
                     icon = Icons.Rounded.SentimentNeutral,
                     label = "Fair",
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 ) { onRate(ConfidenceLevel.KNOWN_FAIRLY) }
 
                 ExpressiveRatingButton(
+                    modifier = buttonModifier,
                     icon = Icons.Rounded.SentimentSatisfied,
                     label = "Good",
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                 ) { onRate(ConfidenceLevel.KNOWN_WELL) }
 
                 ExpressiveRatingButton(
+                    modifier = buttonModifier,
                     icon = Icons.Rounded.AutoAwesome,
                     label = "Mastered",
                     containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -440,35 +449,40 @@ fun RatingSectionExpressive(
 
 @Composable
 fun ExpressiveRatingButton(
+    modifier: Modifier = Modifier,
     icon: ImageVector,
     label: String,
     containerColor: Color,
     onClick: () -> Unit
 ) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
+        modifier = modifier
             .clip(MaterialTheme.shapes.medium)
-            .clickable(onClick = onClick)
-            .padding(4.dp)
+            .background(containerColor)
+            .clickable { onClick() }
+            .padding(vertical = 8.dp, horizontal = 4.dp), // Minimal horizontal padding
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            color = containerColor
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = label, modifier = Modifier.size(28.dp))
-            }
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp), // Smaller icon (standard is 24dp)
+            tint = contentColorFor(containerColor)
+        )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), // Force small font
+            fontWeight = FontWeight.Medium,
+            color = contentColorFor(containerColor),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false // Prevents text from trying to wrap and vertical stretching
         )
     }
 }
+
 
 @Composable
 fun StudyCompletionScreenExpressive(

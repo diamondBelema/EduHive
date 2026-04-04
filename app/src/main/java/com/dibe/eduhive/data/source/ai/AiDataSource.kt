@@ -719,11 +719,20 @@ class AIDataSource @Inject constructor(
             if (key in seenTexts) continue
             seenTexts.add(key)
 
-            val isFakeMcq = type.equals("MCQ", ignoreCase = true) &&
-                    options.size == 2 &&
-                    options.any { it.equals("True", ignoreCase = true) } &&
-                    options.any { it.equals("False", ignoreCase = true) }
-            if (isFakeMcq) type = "TRUE_FALSE"
+            // If the model generated MCQ but filled every option with True/False variants,
+            // reclassify as TRUE_FALSE (2-option) and deduplicate.
+            val trueFalseOptions = setOf("true", "false")
+            val allOptionsTrueFalse = options.isNotEmpty() &&
+                    options.all { it.trim().lowercase() in trueFalseOptions }
+            if (type.equals("MCQ", ignoreCase = true) && allOptionsTrueFalse) {
+                type = "TRUE_FALSE"
+                // Keep only the canonical True/False pair
+                val dedupedOptions = mutableListOf<String>()
+                if (options.any { it.trim().lowercase() == "true" }) dedupedOptions.add("True")
+                if (options.any { it.trim().lowercase() == "false" }) dedupedOptions.add("False")
+                options.clear()
+                options.addAll(dedupedOptions)
+            }
 
             val normalizedCorrect = normalizeCorrectAnswer(correct, options)
             questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, normalizedCorrect))
