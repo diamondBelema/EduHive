@@ -116,7 +116,7 @@ class QuizRepositoryImpl @Inject constructor(
         }
 
         // Check if we got questions
-        val questions = generatedQuestions ?: run {
+        val questions = generatedQuestions?.takeIf { it.isNotEmpty() } ?: run {
             emit(QuizGenerationProgress.Error("No questions generated"))
             return@flow
         }
