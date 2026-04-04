@@ -28,9 +28,9 @@ class FlashcardValidator @Inject constructor() {
         private const val OPTIMAL_ANSWER_MIN_LENGTH = 8
         private const val OPTIMAL_ANSWER_MAX_LENGTH = 200
 
-        /** Terms that indicate a truly broken placeholder response. */
-        private val BROKEN_TERMS = listOf(
-            "undefined", "null", "n/a", "placeholder",
+        /** Terms that indicate vague, placeholder, or broken output. */
+        private val VAGUE_TERMS = listOf(
+            "something", "undefined", "null", "n/a", "placeholder",
             "example here", "fill in", "[question", "[answer", "[front", "[back"
         )
     }
@@ -46,15 +46,18 @@ class FlashcardValidator @Inject constructor() {
             issues.add("Answer too short")
         }
 
-        // Check for placeholder/broken output — but NOT question mark absence
-        // Small models frequently produce valid fill-in-the-blank or definition
-        // style fronts without a "?" and these are educationally sound.
-        for (term in BROKEN_TERMS) {
+        // Check that the question ends with a question mark
+        if (!card.front.trimEnd().endsWith("?")) {
+            issues.add("Question should end with a '?'")
+        }
+
+        // Check for vague or placeholder terms
+        for (term in VAGUE_TERMS) {
             if (card.front.contains(term, ignoreCase = true)) {
-                issues.add("Question contains placeholder: '$term'")
+                issues.add("Question contains vague term: '$term'")
             }
             if (card.back.contains(term, ignoreCase = true)) {
-                issues.add("Answer contains placeholder: '$term'")
+                issues.add("Answer contains vague term: '$term'")
             }
         }
 

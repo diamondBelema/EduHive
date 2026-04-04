@@ -115,8 +115,9 @@ class QuizRepositoryImpl @Inject constructor(
             }
         }
 
-        // Check if we got questions
-        val questions = generatedQuestions ?: run {
+        // Check if we got questions — treat an empty list the same as null so we
+        // never persist a quiz entity that has zero associated questions.
+        val questions = generatedQuestions?.takeIf { it.isNotEmpty() } ?: run {
             emit(QuizGenerationProgress.Error("No questions generated"))
             return@flow
         }
