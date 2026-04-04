@@ -5,28 +5,22 @@ package com.dibe.eduhive.data.source.ai
  */
 object LLMPromptTemplates {
 
-    val KNOWN_EXAMPLE_CONCEPT_NAMES = setOf(
-        "muscle hypertrophy",
-        "osmosis"
-    )
+    val KNOWN_EXAMPLE_CONCEPT_NAMES = emptySet<String>()
 
     // ── Concept extraction ────────────────────────────────────────────────────
 
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-${contextLine}Extract as many specific, testable concepts as you can find in the text below.
-Output only pairs of CONCEPT and DESCRIPTION lines. No other text.
-Each DESCRIPTION must be one or more complete sentence explaining what the concept means.
+${contextLine}Read the text below and extract key concepts from it.
+For every concept found, output exactly two lines:
+CONCEPT: [name of the concept]
+DESCRIPTION: [one complete sentence explaining what it means]
+Output only those lines. Do not copy this instruction. Do not invent concepts not in the text.
 
 Text:
 $text
 
-Output:
-CONCEPT: Muscle hypertrophy
-DESCRIPTION: Increase in muscle fiber size caused by progressive resistance training over time.
-CONCEPT: Osmosis
-DESCRIPTION: Passive diffusion of water molecules across a selectively permeable membrane down a concentration gradient.
 CONCEPT:""".trimIndent()
     }
 

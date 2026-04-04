@@ -472,23 +472,21 @@ class AIDataSource @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun stripPromptEcho(response: String): String {
-        // Strategy 1: OUTPUT_START/END delimiters (old prompt format)
+        // Strategy 1: OUTPUT_START/END delimiters (legacy prompt format)
         val blockStart = response.indexOf("OUTPUT_START")
         val blockEnd = response.indexOf("OUTPUT_END")
         if (blockStart != -1 && blockEnd > blockStart) {
             return response.substring(blockStart + "OUTPUT_START".length, blockEnd).trim()
         }
 
-        // Strategy 2: find the last known example DESCRIPTION line and take everything after
-        // This strips any prompt echo when the model repeats our example before generating
+        // Strategy 2: if the model echoed the prompt instruction text, find the last
+        // occurrence of the instruction boundary and take only what follows.
+        // Markers are anchored to unique phrases in the current prompt template.
         val echoMarkers = listOf(
-            "DESCRIPTION: Passive diffusion of water molecules across a selectively permeable membrane down a concentration gradient.",
-            "DESCRIPTION: Increase in muscle fiber size caused by progressive resistance training over time.",
-            "DESCRIPTION: A short definition of a key idea found in the provided text.",
-            "DESCRIPTION: Another distinct idea from the provided text, not a repeat.",
-            "Output format:",
-            "Extract up to 10 specific concepts",
-            "Output:"
+            "Do not invent concepts not in the text.",
+            "Do not copy this instruction.",
+            "Output only those lines.",
+            "Extract up to 10 specific concepts"
         )
         for (marker in echoMarkers) {
             val idx = response.lastIndexOf(marker)
