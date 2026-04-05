@@ -46,7 +46,7 @@ class AIModelManager @Inject constructor(
         private const val QWEN_URL      = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         private const val SMOLLM_135M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
         // Gemma3-270M: official litert-community Android-compatible q8.task
-        private const val GEMMA3_270M_URL = "https://huggingface.co/diamondbelema/edu-hive-llm-models/resolve/main/gemma3-270m-it-q8.task?download=true"
+        private const val GEMMA3_270M_URL = "https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task?download=true"
 
         // Max time to wait for a download before declaring failure (15 minutes)
         private const val DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000L
@@ -272,11 +272,16 @@ class AIModelManager @Inject constructor(
                 // If the same model is already loaded with the same maxTokens, just update the config for session params
                 if (llmInference != null && loadedModelId == modelId && loadedMaxTokens == config.maxTokens) {
                     currentConfig = config
+                    Log.d(TAG, "loadModel: reusing loaded '$modelId' (maxTokens=${config.maxTokens}), updating session config only")
                     return@withLock Result.success(Unit)
                 }
 
                 val modelFile = getModelFile(modelId)
-                if (!modelFile.exists()) return@withLock Result.failure(Exception("Model file not found"))
+                Log.d(TAG, "loadModel: '$modelId' file=${modelFile.absolutePath} exists=${modelFile.exists()} size=${modelFile.length() / 1_000_000}MB")
+                if (!modelFile.exists()) {
+                    Log.e(TAG, "loadModel: FILE NOT FOUND at ${modelFile.absolutePath}")
+                    return@withLock Result.failure(Exception("Model file not found: ${modelFile.absolutePath}"))
+                }
 
                 currentConfig = config
 
@@ -309,16 +314,21 @@ class AIModelManager @Inject constructor(
      * A fresh session for each generation ensures stateless behavior and stability.
      */
     private fun createSessionInternal(): LlmInferenceSession? {
-        val engine = llmInference ?: return null
+        val engine = llmInference ?: run {
+            Log.e(TAG, "createSessionInternal: engine is NULL — model not loaded")
+            return null
+        }
         return try {
             val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
                 .setTemperature(currentConfig.temperature)
                 .setTopK(currentConfig.topK)
                 .setRandomSeed(currentConfig.randomSeed)
                 .build()
-            LlmInferenceSession.createFromOptions(engine, sessionOptions)
+            val session = LlmInferenceSession.createFromOptions(engine, sessionOptions)
+            Log.d(TAG, "createSessionInternal: OK (temp=${currentConfig.temperature} topK=${currentConfig.topK})")
+            session
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create session", e)
+            Log.e(TAG, "createSessionInternal: FAILED — ${e.message}", e)
             null
         }
     }
@@ -326,13 +336,50 @@ class AIModelManager @Inject constructor(
     /**
      * Generate response using a fresh session to apply parameters and avoid context pollution.
      */
+    /**
+     * Wrap a raw structured prompt in the correct chat format for the active model.
+     *
+     * Gemma (instruction-tuned) requires:
+     *   <start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n{primer}
+     *
+     * The primer is the last line of the prompt (e.g. "FRONT:" / "CONCEPT:") —
+     * we split it off and re-attach it after the model turn marker so the model
+     * continues from it rather than re-generating the instruction header.
+     *
+     * Qwen and SmolLM are more robust to raw prompts and don't need wrapping.
+     */
+    private fun wrapPromptForModel(prompt: String): String {
+        val modelId = loadedModelId ?: return prompt
+        return when {
+            modelId.startsWith("gemma", ignoreCase = true) -> {
+                // Split off the output primer (last non-blank line e.g. "FRONT:")
+                val lines = prompt.trimEnd().lines()
+                val primerLine = lines.lastOrNull { it.isNotBlank() } ?: ""
+                val body = if (primerLine.isNotEmpty()) {
+                    lines.dropLast(lines.reversed().indexOfFirst { it.isNotBlank() } + 1)
+                        .joinToString("\n")
+                } else prompt
+
+                "<start_of_turn>user\n$body<end_of_turn>\n<start_of_turn>model\n$primerLine"
+            }
+            else -> prompt  // Qwen, SmolLM — raw prompt works fine
+        }
+    }
+
     suspend fun generate(prompt: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val engine = llmInference ?: return@withContext Result.failure(Exception("AI engine not loaded"))
+            val engine = llmInference ?: run {
+                Log.e(TAG, "generate: engine is NULL — no model loaded")
+                return@withContext Result.failure(Exception("AI engine not loaded"))
+            }
 
-            val safePrompt = if (prompt.length > MAX_INPUT_CHARS) {
-                prompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
-            } else prompt
+            val wrappedPrompt = wrapPromptForModel(prompt)
+            val safePrompt = if (wrappedPrompt.length > MAX_INPUT_CHARS) {
+                Log.w(TAG, "generate: prompt truncated from ${wrappedPrompt.length} to $MAX_INPUT_CHARS chars")
+                wrappedPrompt.take(MAX_INPUT_CHARS).substringBeforeLast(' ')
+            } else wrappedPrompt
+
+            Log.d(TAG, "generate: prompt=${safePrompt.length} chars, model=$loadedModelId")
 
             val response = inferenceMutex.withLock {
                 val session = createSessionInternal() ?: return@withLock "[Error: Session creation failed]"
@@ -343,9 +390,11 @@ class AIModelManager @Inject constructor(
             }
 
             if (response.startsWith("[Error:")) {
+                Log.e(TAG, "generate: session error — $response")
                 return@withContext Result.failure(Exception(response))
             }
 
+            Log.d(TAG, "generate: got ${response.length} chars back")
             Result.success(response)
 
         } catch (e: Exception) {
@@ -467,7 +516,7 @@ class AIModelManager @Inject constructor(
     private fun getModelInfo(modelId: String): ModelInfo {
         return when (modelId) {
             MODEL_GEMMA4_2B -> ModelInfo(MODEL_GEMMA4_2B, "Gemma 4 2B", "Latest Gemma, superior reasoning", GEMMA4_2B_URL, 1_500_000_000L, 10, false)
-            MODEL_GEMMA3_1B -> ModelInfo(MODEL_GEMMA3_1B, "Gemma 3 1B", "Best reasoning, most intelligent", GEMMA3_1B_URL, 555_000_000L, 15, false)
+            MODEL_GEMMA3_1B -> ModelInfo(MODEL_GEMMA3_1B, "Gemma 3 1B", "Best reasoning, most intelligent", GEMMA3_1B_URL, 689_000_000L, 15, false)
             MODEL_QWEN -> ModelInfo(MODEL_QWEN, "Qwen 2.5 0.5B", "Fast and high-quality", QWEN_URL, 547_000_000L, 30, true)
             MODEL_GEMMA3_270M -> ModelInfo(MODEL_GEMMA3_270M, "Gemma 3 270M", "Balanced performance", GEMMA3_270M_URL, 249_000_000L, 20, false)
             MODEL_SMOLLM_135M -> ModelInfo(MODEL_SMOLLM_135M, "SmolLM 135M", "Fastest, smallest", SMOLLM_135M_URL, 167_000_000L, 50, false)

@@ -53,10 +53,9 @@ class AIDataSource @Inject constructor(
         /**
          * Max unique concepts to accept from a single batch.
          * Small models loop — they'll repeat the same concept 40+ times in one response.
-         * Capping at 5 per batch means even a fully looping response contributes at most
-         * 5 concepts, and duplicates are filtered against the global seenNames set.
+         * Capping at 8 per batch to allow more diversity while still stopping runaway loops.
          */
-        private const val MAX_CONCEPTS_PER_BATCH = 5
+        private const val MAX_CONCEPTS_PER_BATCH = 8
 
         /**
          * Max flashcard facts to inject into a quiz prompt.
@@ -148,8 +147,9 @@ class AIDataSource @Inject constructor(
             val result = modelManager.generate(prompt)
 
             result.onSuccess { response ->
-                Log.d(TAG, "RAW RESPONSE BATCH $index:\n$response")
+                Log.d(TAG, "╔══ CONCEPT BATCH $index RAW (${response.length} chars): ${response.take(300).replace('\n','↵')}")
                 val batchConcepts = parseConceptsRobust(response)
+                Log.d(TAG, "╚══ CONCEPT BATCH $index: parsed ${batchConcepts.size} concepts: ${batchConcepts.map { it.name }}")
 
                 // Deduplicate within this batch AND against all previous batches.
                 // Small models loop — a single batch can return the same concept 40 times.
@@ -335,17 +335,26 @@ class AIDataSource @Inject constructor(
         val safeFacts = facts.take(MAX_FACTS_PER_QUIZ)
         val prompt = LLMPromptTemplates.quizGeneration(conceptName, safeDesc, safeFacts, questionCount)
 
+        Log.d(TAG, "╔══ QUIZ GEN: '$conceptName' count=$questionCount facts=${safeFacts.size}")
+        Log.d(TAG, "║ Prompt (${prompt.length} chars): ${prompt.take(150).replace('\n','↵')}")
+
         modelManager.generateStreaming(prompt).collect { result ->
             when (result) {
                 is GenerationResult.Progress -> send(QuizGenerationState.Generating(
                     (result.completedChunks * 100) / result.totalChunks
                 ))
-                is GenerationResult.Success  -> send(QuizGenerationState.Success(
-                    parseQuizFromResponse(result.text)
-                ))
-                is GenerationResult.Error    -> send(QuizGenerationState.Error(
-                    result.exception.message ?: "Quiz generation failed"
-                ))
+                is GenerationResult.Success  -> {
+                    Log.d(TAG, "║ RAW quiz response (${result.text.length} chars): ${result.text.take(300).replace('\n','↵')}")
+                    val questions = parseQuizFromResponse(result.text)
+                    Log.d(TAG, "╚══ QUIZ GEN: parsed ${questions.size} questions for '$conceptName'")
+                    questions.forEachIndexed { i, q -> Log.d(TAG, "    [$i] type=${q.type} text='${q.text.take(60)}' correct=${q.correctAnswer} opts=${q.options?.size}") }
+                    if (questions.isEmpty()) Log.e(TAG, "✗ ZERO quiz questions parsed — check raw response above")
+                    send(QuizGenerationState.Success(questions))
+                }
+                is GenerationResult.Error    -> {
+                    Log.e(TAG, "╚══ QUIZ GEN FAILED for '$conceptName': ${result.exception.message}")
+                    send(QuizGenerationState.Error(result.exception.message ?: "Quiz generation failed"))
+                }
             }
         }
     }.flowOn(Dispatchers.IO)
@@ -384,14 +393,27 @@ class AIDataSource @Inject constructor(
         val safeDesc = conceptDescription.take(MAX_INPUT_CHARS_FLASHCARDS)
         val basePrompt = LLMPromptTemplates.flashcardDraft(conceptName, safeDesc, count)
 
+        Log.d(TAG, "╔══ FLASHCARD GEN: '$conceptName' count=$count skipValidation=$skipValidation")
+        Log.d(TAG, "║ Prompt (${basePrompt.length} chars): ${basePrompt.take(120).replace('\n', '↵')}")
+
         // Fast-track: single attempt, accept output as-is (no refinement pass)
         if (skipValidation) {
             val result = modelManager.generate(basePrompt)
             result.onSuccess { response ->
-                val parsed = parseFlashcardsRobust(response)
-                return ValidationResult(parsed, 0)
+                val parsed = parseFlashcardsRobust(response, conceptName, conceptDescription = safeDesc)
+                val filled = fillToTargetWithFallback(
+                    cards = parsed,
+                    conceptName = conceptName,
+                    conceptDescription = safeDesc,
+                    targetCount = count,
+                    validate = false
+                )
+                Log.d(TAG, "║ Fast-track: parsed ${parsed.size} cards, final=${filled.size}")
+                filled.forEachIndexed { i, c -> Log.d(TAG, "║   [$i] F='${c.front.take(40)}' B='${c.back.take(40)}'") }
+                Log.d(TAG, "╚══ FLASHCARD GEN done (fast-track)")
+                return ValidationResult(filled, 0)
             }.onFailure { e ->
-                Log.w(TAG, "Fast-track generation failed for \"$conceptName\": ${e.message}")
+                Log.e(TAG, "╚══ Fast-track generation FAILED for '$conceptName': ${e.message}")
             }
             return ValidationResult(emptyList(), 0)
         }
@@ -403,54 +425,81 @@ class AIDataSource @Inject constructor(
         for (attempt in 0 until GenerationConfig.FLASHCARD.retryAttempts) {
             if (attempt > 0) onRetrying(attempt)
 
+            Log.d(TAG, "║ Attempt $attempt/${GenerationConfig.FLASHCARD.retryAttempts - 1}")
             val mutatedPrompt = LLMPromptTemplates.mutate(basePrompt, attempt)
             val result = modelManager.generate(mutatedPrompt)
 
             result.onSuccess { response ->
-                val parsed = parseFlashcardsRobust(response)
+                val parsed = parseFlashcardsRobust(response, conceptName, conceptDescription = safeDesc)
                 val passRate = flashcardValidator.passRate(parsed)
-                Log.d(TAG, "Flashcard attempt $attempt: ${parsed.size} cards, passRate=$passRate")
-
+                Log.d(TAG, "║ Attempt $attempt: parsed=${parsed.size} valid=${flashcardValidator.filterValid(parsed).size} passRate=${"%.2f".format(passRate)}")
+                parsed.forEachIndexed { i, c ->
+                    val q = flashcardValidator.validate(c)
+                    Log.d(TAG, "║   [$i] valid=${q.isValid} score=${"%.2f".format(q.score)} F='${c.front.take(50)}' B='${c.back.take(50)}'")
+                    if (q.issues.isNotEmpty()) Log.w(TAG, "║       issues=${q.issues}")
+                }
                 if (passRate > bestPassRate) {
                     bestPassRate = passRate
                     bestDraft = parsed
                 }
                 if (passRate >= MIN_PASS_RATE) earlySuccess = true
             }.onFailure { e ->
-                Log.w(TAG, "Flashcard attempt $attempt failed: ${e.message}")
+                Log.e(TAG, "║ Attempt $attempt FAILED: ${e.message}")
             }
 
             if (earlySuccess) break
         }
 
-        // Fast path: pass rate already good enough
         if (earlySuccess) {
             val valid = flashcardValidator.filterValid(bestDraft)
-            return ValidationResult(valid, bestDraft.size - valid.size)
+            val final = fillToTargetWithFallback(
+                cards = valid,
+                conceptName = conceptName,
+                conceptDescription = safeDesc,
+                targetCount = count,
+                validate = true
+            )
+            Log.d(TAG, "╚══ Early success: ${valid.size} valid cards, final=${final.size}")
+            return ValidationResult(final, bestDraft.size - valid.size)
         }
 
         // Pass 2: refine the cards that failed validation
         val validFromDraft   = flashcardValidator.filterValid(bestDraft)
         val invalidFromDraft = bestDraft.filter { !flashcardValidator.validate(it).isValid }
 
+        Log.d(TAG, "║ Pass 2: ${validFromDraft.size} valid, ${invalidFromDraft.size} need refinement, bestPassRate=${"%.2f".format(bestPassRate)}")
+
         if (invalidFromDraft.isNotEmpty() && bestPassRate < MIN_PASS_RATE) {
-            Log.d(TAG, "Pass 2: refining ${invalidFromDraft.size} low-quality cards")
             val refinementPrompt = LLMPromptTemplates.flashcardRefinement(invalidFromDraft)
             val refinedResult = modelManager.generate(refinementPrompt)
 
             refinedResult.onSuccess { refinedResponse ->
-                val refined = flashcardValidator.filterValid(parseFlashcardsRobust(refinedResponse))
+                val refined = flashcardValidator.filterValid(
+                    parseFlashcardsRobust(refinedResponse, conceptName, conceptDescription = safeDesc)
+                )
+                Log.d(TAG, "║ Refinement: ${refined.size} cards passed")
                 if (refined.isNotEmpty()) {
                     val combined = (validFromDraft + refined).distinctBy { it.front.lowercase().trim() }
+                    Log.d(TAG, "╚══ After refinement: ${combined.size} total cards")
                     return ValidationResult(combined, bestDraft.size - combined.size)
                 }
             }.onFailure { e ->
-                Log.w(TAG, "Refinement pass failed: ${e.message}")
+                Log.e(TAG, "║ Refinement pass FAILED: ${e.message}")
             }
         }
 
-        // Accept what we have — even if below threshold, it's better than nothing
-        val finalCards = validFromDraft.ifEmpty { bestDraft }
+        val baseFinalCards = validFromDraft.ifEmpty { bestDraft }
+        val finalCards = fillToTargetWithFallback(
+            cards = baseFinalCards,
+            conceptName = conceptName,
+            conceptDescription = safeDesc,
+            targetCount = count,
+            validate = true
+        )
+        Log.d(TAG, "╚══ Final result: ${finalCards.size} cards (bestPassRate=${"%.2f".format(bestPassRate)})")
+        if (finalCards.isEmpty()) {
+            Log.e(TAG, "✗ ZERO flashcards produced for '$conceptName' — check raw response above")
+        }
         return ValidationResult(finalCards, bestDraft.size - finalCards.size)
     }
 
@@ -459,47 +508,126 @@ class AIDataSource @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
 
     private suspend fun ensureModelLoaded(config: GenerationConfig = GenerationConfig()): Boolean {
-        // Always call loadModel — it checks internally whether a reload is actually needed
-        // (same modelId + same maxTokens = no reload, just updates session config).
-        // The old guard "if isModelLoaded return true" bypassed the config entirely,
-        // meaning maxTokens was never updated between tasks (concept=800, flashcard=1280).
-        val modelId = modelPreferences.getActiveModel() ?: return false
-        return modelManager.loadModel(modelId, config).isSuccess
+        val modelId = modelPreferences.getActiveModel()
+        if (modelId == null) {
+            Log.e(TAG, "ensureModelLoaded: NO ACTIVE MODEL SET — user needs to download a model")
+            return false
+        }
+        Log.d(TAG, "ensureModelLoaded: modelId=$modelId maxTokens=${config.maxTokens} temp=${config.temperature}")
+        val result = modelManager.loadModel(modelId, config)
+        if (result.isFailure) {
+            Log.e(TAG, "ensureModelLoaded: FAILED to load '$modelId': ${result.exceptionOrNull()?.message}")
+        }
+        return result.isSuccess
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Parsers
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun stripPromptEcho(response: String): String {
-        // Strategy 1: OUTPUT_START/END delimiters (legacy prompt format)
-        val blockStart = response.indexOf("OUTPUT_START")
-        val blockEnd = response.indexOf("OUTPUT_END")
-        if (blockStart != -1 && blockEnd > blockStart) {
-            return response.substring(blockStart + "OUTPUT_START".length, blockEnd).trim()
+    /**
+     * Strip chat-model wrapper tokens and prompt echoes from raw model output.
+     *
+     * Instruction-tuned models (Gemma 1B, Qwen) may wrap responses in chat
+     * turn markers or repeat the prompt before generating.  We need the bare
+     * structured output (CONCEPT:/FRONT:/BACK:/QUESTION lines) only.
+     */
+    private fun stripModelWrapper(response: String): String {
+        Log.d(TAG, "RAW response (${response.length} chars): ${response.take(200)}")
+
+        // Handle literal \n and \r\n that some small models output instead of real newlines.
+        // Also drop zero-width Unicode chars that make outputs look blank after trimming.
+        var cleaned = response
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace(Regex("[\\u200B-\\u200D\\uFEFF]"), "")
+
+        // 1. Strip Gemma-style chat turn markers
+        //    <start_of_turn>model
+        // <end_of_turn>
+        val startMarker = "<start_of_turn>model"
+        val endMarker   = "<end_of_turn>"
+        val turnStart = cleaned.indexOf(startMarker)
+        if (turnStart != -1) {
+            val contentStart = turnStart + startMarker.length
+            val turnEnd = cleaned.indexOf(endMarker, contentStart)
+            cleaned = if (turnEnd != -1) {
+                cleaned.substring(contentStart, turnEnd)
+            } else {
+                cleaned.substring(contentStart)
+            }.trim()
+            Log.d(TAG, "Stripped Gemma chat wrapper")
         }
 
-        // Strategy 2: if the model echoed the prompt instruction text, find the last
-        // occurrence of the instruction boundary and take only what follows.
-        // Markers are anchored to unique phrases in the current prompt template.
+        // 2. Strip Qwen/SmolLM assistant markers
+        //    <|im_start|>assistant
+        // <|im_end|>
+        val qwenStart = "<|im_start|>assistant"
+        val qwenEnd   = "<|im_end|>"
+        val qStart = cleaned.indexOf(qwenStart)
+        if (qStart != -1) {
+            val contentStart = qStart + qwenStart.length
+            val qEnd = cleaned.indexOf(qwenEnd, contentStart)
+            cleaned = if (qEnd != -1) {
+                cleaned.substring(contentStart, qEnd)
+            } else {
+                cleaned.substring(contentStart)
+            }.trim()
+            Log.d(TAG, "Stripped Qwen chat wrapper")
+        }
+
+        // 3. Strip prompt echo — if the model repeated instruction text,
+        //    jump to the first structured output line.
         val echoMarkers = listOf(
             "Do not invent concepts not in the text.",
             "Do not copy this instruction.",
             "Output only those lines.",
+            "Output only FRONT and BACK lines.",
+            "Output only CONCEPT, FRONT, and BACK lines.",
             "Extract up to 10 specific concepts"
         )
         for (marker in echoMarkers) {
-            val idx = response.lastIndexOf(marker)
+            val idx = cleaned.lastIndexOf(marker)
             if (idx != -1) {
-                val afterMarker = response.substring(idx + marker.length)
-                val nextConcept = afterMarker.indexOf("CONCEPT:")
-                if (nextConcept != -1) {
-                    return afterMarker.substring(nextConcept).trim()
+                val after = cleaned.substring(idx + marker.length)
+                // Jump to the first known structural keyword
+                val structuralKeywords = listOf("CONCEPT:", "FRONT:", "QUESTION 1", "QUESTION1")
+                for (kw in structuralKeywords) {
+                    val kwIdx = after.indexOf(kw)
+                    if (kwIdx != -1) {
+                        cleaned = after.substring(kwIdx).trim()
+                        Log.d(TAG, "Stripped prompt echo at marker: '${marker.take(30)}'")
+                        break
+                    }
                 }
+                break
             }
         }
-        return response
+
+        // 4. Strip markdown code fences (```...```)
+        if (cleaned.startsWith("```")) {
+            val fenceEnd = cleaned.indexOf("```", 3)
+            cleaned = if (fenceEnd != -1) cleaned.substring(3, fenceEnd).trim()
+            else cleaned.removePrefix("```").trim()
+            // Remove optional language tag (```kotlin, ```text, etc.)
+            val firstNewline = cleaned.indexOf('\n')
+            if (firstNewline != -1 && firstNewline < 20) {
+                cleaned = cleaned.substring(firstNewline).trim()
+            }
+            Log.d(TAG, "Stripped markdown code fence")
+        }
+
+        cleaned = cleaned
+            .lines()
+            .joinToString("\n") { it.trimEnd() }
+            .trim()
+
+        Log.d(TAG, "CLEANED response (${cleaned.length} chars): ${cleaned.take(200)}")
+        return cleaned
     }
+
+    // Keep old name as alias so concept parser still works unchanged
+    private fun stripPromptEcho(response: String) = stripModelWrapper(response)
 
     private fun parseGroundedAnswer(response: String): GroundedAnswer {
         val answerLine = response
@@ -546,21 +674,44 @@ class AIDataSource @Inject constructor(
         val cleaned = stripPromptEcho(response)
         if (cleaned.contains("NO_CONCEPTS", ignoreCase = true)) return emptyList()
 
+        // Try structured parsing first (CONCEPT: / DESCRIPTION: format)
+        val structuredConcepts = parseConceptsStructured(cleaned)
+        if (structuredConcepts.isNotEmpty()) {
+            return structuredConcepts
+        }
+
+        // Fallback: parse natural language format when model ignores formatting instructions
+        Log.d(TAG, "Structured parsing failed, trying natural language fallback")
+        return parseConceptsNaturalLanguage(cleaned)
+    }
+
+    private fun parseConceptsStructured(response: String): List<ExtractedConcept> {
         val concepts = mutableListOf<ExtractedConcept>()
         var currentName: String? = null
 
-        val lines = cleaned.lines()
-        lines.forEachIndexed { idx, line ->
+        val lines = response.lines().map { it.trim() }.filter { it.isNotBlank() }
+
+        // Handle cases where the first CONCEPT: label is missing (due to prompt primer)
+        var startIndex = 0
+        if (lines.isNotEmpty() &&
+            !lines[0].startsWith("CONCEPT:", ignoreCase = true) &&
+            !lines[0].startsWith("DESCRIPTION:", ignoreCase = true) &&
+            lines.size > 1 &&
+            lines[1].startsWith("DESCRIPTION:", ignoreCase = true)) {
+            currentName = lines[0].replace("*", "").trim()
+            startIndex = 1
+        }
+
+        for (i in startIndex until lines.size) {
+            val line = lines[i]
             val cleanLine = line.replace("*", "").trim()
 
             when {
                 cleanLine.startsWith("CONCEPT:", ignoreCase = true) -> {
                     // If we had a previous concept with no description, flush it now
-                    // before overwriting currentName
                     if (currentName != null) {
                         if (currentName!!.isNotBlank() &&
                             currentName!!.lowercase() !in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
-                            // Use name as description fallback — better than discarding
                             concepts.add(ExtractedConcept(currentName!!, currentName!!))
                         }
                     }
@@ -586,10 +737,15 @@ class AIDataSource @Inject constructor(
                     }
                     currentName = null
                 }
+                
+                // If a line doesn't have a label but is followed by one with DESCRIPTION:
+                i + 1 < lines.size && lines[i+1].startsWith("DESCRIPTION:", ignoreCase = true) -> {
+                    currentName = cleanLine
+                }
             }
         }
 
-        // Flush any trailing concept that had no description
+        // Flush trailing concept
         if (currentName != null &&
             currentName!!.isNotBlank() &&
             currentName!!.lowercase() !in LLMPromptTemplates.KNOWN_EXAMPLE_CONCEPT_NAMES) {
@@ -599,39 +755,160 @@ class AIDataSource @Inject constructor(
         return concepts
     }
 
-    private fun parseFlashcardsRobust(response: String): List<GeneratedFlashcard> {
-        val flashcards = mutableListOf<GeneratedFlashcard>()
-        var currentFront: String? = null
+    private fun parseConceptsNaturalLanguage(response: String): List<ExtractedConcept> {
+        val concepts = mutableListOf<ExtractedConcept>()
+        val seenConcepts = mutableSetOf<String>()
 
-        for (line in response.lines()) {
+        // Helper to add if valid and unique
+        fun addIfValid(name: String, description: String) {
+            val cleanName = name.replace("*", "").trim()
+            val cleanDesc = description.replace("*", "").trim()
+            if (cleanName.isNotBlank() && 
+                cleanDesc.length > 5 &&
+                cleanName.lowercase() !in seenConcepts &&
+                !cleanName.lowercase().startsWith("[") &&
+                !cleanDesc.lowercase().contains("do not") &&
+                !cleanDesc.lowercase().contains("placeholder")) {
+                concepts.add(ExtractedConcept(cleanName, cleanDesc))
+                seenConcepts.add(cleanName.lowercase())
+            }
+        }
+
+        // Pattern 1: Bold pattern: **ConceptName** is description or **ConceptName**: description
+        val boldPattern = Regex("\\*\\*([^*]+)\\*\\*[:\\s]+([^\\n]+)")
+        boldPattern.findAll(response).forEach { match ->
+            addIfValid(match.groupValues[1], match.groupValues[2])
+        }
+
+        // Pattern 2: "Concept is description" pattern (handling bullet points)
+        // Matches: "* Sociology is the study of..." or "Medical Sociology is a subdiscipline..."
+        val isPattern = Regex("(?m)^\\s*[*-]?\\s*([A-Z][^:.\\n]+?)\\s+(?:is|refers to|refers specifically to)\\s+([^\\n]+)")
+        isPattern.findAll(response).forEach { match ->
+            addIfValid(match.groupValues[1], match.groupValues[2])
+        }
+
+        // Pattern 3: Numbered or bullet concepts: "1. Name: Description" or "* Name - Description"
+        val bulletPattern = Regex("(?m)^\\s*(?:\\d+\\.|-|\\*)\\s*([A-Z][^:.\\n]+)[:.-]\\s*([^\\n]+)")
+        bulletPattern.findAll(response).forEach { match ->
+            addIfValid(match.groupValues[1], match.groupValues[2])
+        }
+
+        Log.d(TAG, "Natural language fallback extracted ${concepts.size} concepts: ${concepts.map { it.name }}")
+        return concepts
+    }
+
+    private fun parseFlashcardsRobust(
+        response: String,
+        conceptName: String? = null,
+        conceptDescription: String? = null
+    ): List<GeneratedFlashcard> {
+        val cleaned = stripModelWrapper(response)
+        val flashcards = mutableListOf<GeneratedFlashcard>()
+
+        val lines = cleaned.lines().map { it.trim() }.filter { it.isNotBlank() }
+        var currentFront: String? = null
+        var currentBack: String? = null
+
+        fun flushIfComplete() {
+            val front = currentFront?.trim().orEmpty()
+            var back = currentBack?.trim().orEmpty()
+            if (back.isBlank()) {
+                back = conceptDescription?.takeIf { it.isNotBlank() }?.trim().orEmpty()
+            }
+            if (front.isNotBlank() && back.length > 4) {
+                flashcards.add(GeneratedFlashcard(front, back))
+            }
+            currentFront = null
+            currentBack = null
+        }
+
+        for (line in lines) {
             val cleanLine = line.replace("*", "").trim()
             when {
                 cleanLine.startsWith("FRONT:", ignoreCase = true) -> {
+                    if (!currentFront.isNullOrBlank() || !currentBack.isNullOrBlank()) {
+                        flushIfComplete()
+                    }
                     currentFront = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
                 }
-                cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
-                    val back = cleanLine
+                cleanLine.startsWith("BACK:", ignoreCase = true) -> {
+                    val backLine = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
-                    // Skip if back is a bracket placeholder the model echoed literally
-                    val isPlaceholder = back.startsWith("[") || back.endsWith("]") ||
-                            back.lowercase().startsWith("brief ") ||
-                            back.lowercase().startsWith("concise ") ||
-                            back.lowercase().contains("explanation of the") ||
-                            back.lowercase().contains("description of the") ||
-                            back.lowercase().contains("mission statement") ||
-                            back.lowercase().startsWith("a brief") ||
-                            back.lowercase().startsWith("an explanation")
-                    if (currentFront!!.isNotBlank() && back.length > 10 && !isPlaceholder) {
-                        flashcards.add(GeneratedFlashcard(currentFront!!, back))
+                    if (currentFront.isNullOrBlank() && !conceptName.isNullOrBlank()) {
+                        currentFront = "What is $conceptName?"
                     }
-                    currentFront = null
+                    currentBack = backLine
+                }
+                currentBack != null -> {
+                    // Multiline BACK continuation.
+                    currentBack = (currentBack + " " + cleanLine).trim()
+                }
+                currentFront == null && cleanLine.endsWith("?") -> {
+                    // Some outputs omit FRONT: label but still emit a question.
+                    currentFront = cleanLine
                 }
             }
         }
+
+        flushIfComplete()
         return flashcards
+    }
+
+    private fun fillToTargetWithFallback(
+        cards: List<GeneratedFlashcard>,
+        conceptName: String,
+        conceptDescription: String,
+        targetCount: Int,
+        validate: Boolean
+    ): List<GeneratedFlashcard> {
+        if (cards.size >= targetCount) return cards.distinctBy { it.front.lowercase().trim() }
+
+        val base = cards.toMutableList()
+        val fallback = synthesizeFallbackFlashcards(
+            conceptName = conceptName,
+            conceptDescription = conceptDescription,
+            count = targetCount - base.size
+        )
+        val merged = (base + fallback).distinctBy { it.front.lowercase().trim() }
+
+        val final = if (validate) flashcardValidator.filterValid(merged) else merged
+        if (final.size > cards.size) {
+            Log.d(TAG, "║ Fallback filled ${final.size - cards.size} missing flashcards for '$conceptName'")
+        }
+        return final.take(targetCount)
+    }
+
+    private fun synthesizeFallbackFlashcards(
+        conceptName: String,
+        conceptDescription: String,
+        count: Int
+    ): List<GeneratedFlashcard> {
+        if (count <= 0) return emptyList()
+
+        val desc = conceptDescription.trim().ifBlank {
+            "$conceptName is an important concept from your study material."
+        }
+        val sentences = desc
+            .split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.length > 10 }
+
+        val fronts = listOf(
+            "What is $conceptName?",
+            "Why is $conceptName important?",
+            "What is one key idea in $conceptName?",
+            "How would you explain $conceptName in one sentence?",
+            "What should you remember about $conceptName?"
+        )
+
+        return (0 until count).map { i ->
+            val front = fronts[i % fronts.size]
+            val back = sentences.getOrElse(i % maxOf(sentences.size, 1)) { desc }
+            GeneratedFlashcard(front, back)
+        }
     }
 
     private fun parseFlashcardsWithConceptIndex(
@@ -642,12 +919,32 @@ class AIDataSource @Inject constructor(
         var currentConceptIndex = 1
         var conceptTagSeen = false
         var currentFront: String? = null
+        var currentBack: String? = null
         var cardCount = 0
 
-        for (line in response.lines()) {
+        fun flushIndexed() {
+            val front = currentFront?.trim().orEmpty()
+            val back = currentBack?.trim().orEmpty()
+            if (front.isNotBlank() && back.length > 4) {
+                result.add(Pair(currentConceptIndex, GeneratedFlashcard(front, back)))
+                cardCount++
+                if (!conceptTagSeen && conceptCount > 1) {
+                    currentConceptIndex = (cardCount % conceptCount) + 1
+                }
+            }
+            currentFront = null
+            currentBack = null
+            conceptTagSeen = false
+        }
+
+        for (line in stripModelWrapper(response).lines()) {
             val cleanLine = line.replace("*", "").trim()
+            if (cleanLine.isBlank()) continue
             when {
                 cleanLine.startsWith("CONCEPT:", ignoreCase = true) -> {
+                    if (!currentFront.isNullOrBlank() || !currentBack.isNullOrBlank()) {
+                        flushIndexed()
+                    }
                     val parsed = cleanLine.substringAfter(":").trim().toIntOrNull()
                     if (parsed != null && parsed in 1..conceptCount) {
                         currentConceptIndex = parsed
@@ -655,30 +952,29 @@ class AIDataSource @Inject constructor(
                     }
                 }
                 cleanLine.startsWith("FRONT:", ignoreCase = true) -> {
+                    if (!currentFront.isNullOrBlank() || !currentBack.isNullOrBlank()) {
+                        flushIndexed()
+                    }
                     currentFront = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
                 }
-                cleanLine.startsWith("BACK:", ignoreCase = true) && currentFront != null -> {
-                    val back = cleanLine
+                cleanLine.startsWith("BACK:", ignoreCase = true) -> {
+                    currentBack = cleanLine
                         .substringAfter(":").trim()
                         .removePrefix("[").removeSuffix("]").trim()
-                    if (currentFront!!.isNotBlank() && back.length > 4) {
-                        result.add(Pair(currentConceptIndex, GeneratedFlashcard(currentFront!!, back)))
-                        cardCount++
-                        if (!conceptTagSeen && conceptCount > 1) {
-                            currentConceptIndex = (cardCount % conceptCount) + 1
-                        }
-                    }
-                    currentFront = null
-                    conceptTagSeen = false
+                }
+                currentBack != null -> {
+                    currentBack = (currentBack + " " + cleanLine).trim()
                 }
             }
         }
+        flushIndexed()
         return result
     }
 
     private fun parseQuizFromResponse(response: String): List<GeneratedQuizQuestion> {
+        val cleaned = stripModelWrapper(response)
         val questions = mutableListOf<GeneratedQuizQuestion>()
         val seenTexts = mutableSetOf<String>()
 
@@ -697,7 +993,7 @@ class AIDataSource @Inject constructor(
                     l.contains("choice") || l.contains("option")
         }
 
-        val blocks = response.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))
+        val blocks = cleaned.split(Regex("QUESTION\\s*\\d+", RegexOption.IGNORE_CASE))
 
         for (block in blocks) {
             if (block.isBlank()) continue

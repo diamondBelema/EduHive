@@ -50,13 +50,14 @@ data class GenerationConfig(
          *
          * Temperature 0.4 gives enough variety to avoid identical cards.
          */
-        // retryAttempts=1: single pass — second attempt rarely improves small-model output
+        // retryAttempts=2: first pass stays fast; second pass recovers when small models
+        // return BACK-only/empty responses on the first try.
         val FLASHCARD = GenerationConfig(
             maxTokens = 1280,
             temperature = 0.4f,
             topK = 20,
             randomSeed = 42,
-            retryAttempts = 1,
+            retryAttempts = 2,
             validateBeforeStore = true
         )
 

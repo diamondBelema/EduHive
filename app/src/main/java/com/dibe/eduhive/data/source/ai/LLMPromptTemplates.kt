@@ -12,11 +12,17 @@ object LLMPromptTemplates {
     fun conceptExtraction(text: String, hiveContext: String = ""): String {
         val contextLine = if (hiveContext.isNotBlank()) "Subject: $hiveContext\n" else ""
         return """
-${contextLine}Read the text below and extract key concepts from it.
-For every concept found, output exactly two lines:
-CONCEPT: [name of the concept]
-DESCRIPTION: [one complete sentence explaining what it means]
-Output only those lines. Do not copy this instruction. Do not invent concepts not in the text.
+${contextLine}TASK: Extract 5-10 key concepts from the text below.
+
+OUTPUT FORMAT:
+CONCEPT: Concept Name
+DESCRIPTION: Short explanation
+
+RULES:
+- Use EXACTLY the CONCEPT: and DESCRIPTION: labels.
+- One concept per pair of lines.
+- No introductory text or extra commentary.
+- Only from the provided text.
 
 Text:
 $text
@@ -29,11 +35,21 @@ CONCEPT:""".trimIndent()
 
     fun flashcardDraft(conceptName: String, conceptDescription: String, count: Int): String {
         return """
-Create $count flashcards for the concept below.
-For each flashcard output exactly two lines:
-FRONT: [specific question about the concept]
-BACK: [complete answer — not a placeholder]
-Output only FRONT and BACK lines. Do not copy this instruction.
+Create $count flashcards for this concept.
+
+You MUST output EXACTLY this repeated format:
+FRONT: <question>
+BACK: <answer>
+
+Hard rules:
+- Every FRONT must be followed by a BACK.
+- Do not output BACK without a FRONT.
+- No markdown, no bullets, no extra labels.
+- If unsure, still output valid FRONT/BACK pairs.
+
+Example:
+FRONT: What is photosynthesis?
+BACK: Photosynthesis is the process plants use to convert light energy into chemical energy.
 
 CONCEPT: $conceptName
 Definition: $conceptDescription
@@ -48,7 +64,7 @@ FRONT:""".trimIndent()
 
         return """
 Generate $countPerConcept flashcards for each concept below.
-Output only CONCEPT, FRONT, and BACK lines. Do not copy this instruction.
+Output only CONCEPT, FRONT, and BACK lines.
 
 $conceptsBlock
 
@@ -122,8 +138,24 @@ TEXT:""".trimIndent()
     fun mutate(basePrompt: String, attempt: Int): String {
         val suffix = when (attempt) {
             0 -> ""
-            1 -> "\nFocus on real-world applications and practical scenarios."
-            else -> "\nFocus on edge cases and subtle differences between related ideas."
+            1 -> """
+
+Retry mode:
+- Your last answer likely had missing structure.
+- Output at least 2 complete FRONT/BACK pairs.
+- Never output BACK alone.
+- Keep answers factual and concise.
+""".trimIndent()
+            else -> """
+
+Final retry mode:
+- Emit strict pairs only.
+- Pattern:
+FRONT: ...
+BACK: ...
+FRONT: ...
+BACK: ...
+""".trimIndent()
         }
         return basePrompt + suffix
     }

@@ -170,6 +170,7 @@ class MaterialProcessingWorker @AssistedInject constructor(
 
                 try {
                     var cardsAdded = 0
+                    android.util.Log.d("MaterialWorker", "▶ Flashcard gen start: '${concept.name}' id=${concept.id} skipValidation=$isSmallFile")
                     flashcardRepository.generateFlashcardsForConceptStreaming(
                         conceptId = concept.id,
                         conceptName = concept.name,
@@ -177,14 +178,27 @@ class MaterialProcessingWorker @AssistedInject constructor(
                         count = 3,
                         skipValidation = isSmallFile
                     ).collect { progress ->
-                        if (progress is FlashcardGenerationProgress.Success) {
-                            cardsAdded = progress.flashcards.size
-                            totalValid += cardsAdded
+                        when (progress) {
+                            is FlashcardGenerationProgress.Success -> {
+                                cardsAdded = progress.flashcards.size
+                                totalValid += cardsAdded
+                                android.util.Log.d("MaterialWorker", "✓ Flashcard gen OK: '${concept.name}' → $cardsAdded cards (rejected=${progress.rejectedCount})")
+                            }
+                            is FlashcardGenerationProgress.Error -> {
+                                android.util.Log.e("MaterialWorker", "✗ Flashcard gen ERROR for '${concept.name}': ${progress.message}")
+                            }
+                            is FlashcardGenerationProgress.Loading -> {
+                                android.util.Log.d("MaterialWorker", "  Loading model for '${concept.name}'...")
+                            }
+                            else -> {}
                         }
                     }
-                    if (cardsAdded == 0) failedConcepts.add(concept.name)
+                    if (cardsAdded == 0) {
+                        android.util.Log.w("MaterialWorker", "⚠ Zero cards for '${concept.name}' — added to failed list")
+                        failedConcepts.add(concept.name)
+                    }
                 } catch (e: Exception) {
-                    android.util.Log.e("MaterialWorker", "Failed cards for ${concept.name}", e)
+                    android.util.Log.e("MaterialWorker", "✗ EXCEPTION generating cards for '${concept.name}': ${e.message}", e)
                     failedConcepts.add(concept.name)
                 }
             }
