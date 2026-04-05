@@ -603,6 +603,7 @@ fun CreateHiveBottomSheet(
         shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
         contentWindowInsets = { BottomSheetDefaults.windowInsets }
     ) {
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
