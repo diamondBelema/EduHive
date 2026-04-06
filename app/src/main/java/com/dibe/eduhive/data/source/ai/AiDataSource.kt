@@ -1007,6 +1007,13 @@ class AIDataSource @Inject constructor(
                 when {
                     trimmed.startsWith("TYPE:",    ignoreCase = true) -> type    = trimmed.substringAfter(":").trim()
                     trimmed.startsWith("TEXT:",    ignoreCase = true) -> text    = trimmed.substringAfter(":").trim()
+                    trimmed.startsWith("OPTIONS:", ignoreCase = true) -> {
+                        val rawOptions = trimmed.substringAfter(":").trim()
+                        val parsedOptions = extractQuizOptions(rawOptions)
+                        if (parsedOptions.isNotEmpty()) {
+                            options.addAll(parsedOptions.filterNot(::isPlaceholderOption))
+                        }
+                    }
                     trimmed.startsWith("OPTION",   ignoreCase = true) -> {
                         val opt = trimmed.substringAfter(":", "").trim()
                         if (opt.isNotEmpty() && !isPlaceholderOption(opt)) options.add(opt)
@@ -1035,13 +1042,75 @@ class AIDataSource @Inject constructor(
                 options.addAll(deduped)
             }
 
-            // Discard MCQ questions that ended up with fewer than 2 real options after filtering
-            if (type.equals("MCQ", ignoreCase = true) && options.size < 2) continue
+            // Qwen often returns MCQ text without usable options; convert to a
+            // deterministic TRUE_FALSE question so quiz UI still has content.
+            if (type.equals("MCQ", ignoreCase = true) && options.size < 2) {
+                val fallbackText = buildTrueFalsePromptText(text)
+                if (fallbackText.isNotBlank()) {
+                    questions.add(
+                        GeneratedQuizQuestion(
+                            type = "TRUE_FALSE",
+                            text = fallbackText,
+                            options = listOf("True", "False"),
+                            correctAnswer = "A"
+                        )
+                    )
+                }
+                continue
+            }
 
             val normalizedCorrect = normalizeCorrectAnswer(correct, options)
             questions.add(GeneratedQuizQuestion(type, text, options.ifEmpty { null }, normalizedCorrect))
         }
         return questions
+    }
+
+    private fun extractQuizOptions(rawOptions: String): List<String> {
+        val normalized = rawOptions
+            .replace("[multiple choice]", "", ignoreCase = true)
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        if (normalized.isBlank()) return emptyList()
+
+        val bracketMatches = Regex("\\[(?:A|B|C|D)\\]\\s*(.*?)(?=(?:\\s*\\[(?:A|B|C|D)\\]\\s*)|$)", RegexOption.IGNORE_CASE)
+            .findAll(normalized)
+            .map { it.groupValues[1].trim().trimEnd('.', ';') }
+            .filter { it.isNotBlank() }
+            .toList()
+        if (bracketMatches.size >= 2) return bracketMatches
+
+        val letterMatches = Regex("(?:^|\\s)(?:OPTIONS?\\s*)?[A-D][\\).:]\\s*(.*?)(?=(?:\\s+(?:OPTIONS?\\s*)?[A-D][\\).:]\\s*)|$)", RegexOption.IGNORE_CASE)
+            .findAll(normalized)
+            .map { it.groupValues[1].trim().trimEnd('.', ';') }
+            .filter { it.isNotBlank() }
+            .toList()
+        if (letterMatches.size >= 2) return letterMatches
+
+        return emptyList()
+    }
+
+    private fun buildTrueFalsePromptText(rawText: String): String {
+        val normalized = rawText
+            .replace(Regex("\\s+"), " ")
+            .replace("[multiple choice]", "", ignoreCase = true)
+            .trim()
+
+        if (normalized.isBlank()) return ""
+
+        // If it already looks like a question, keep it and convert to T/F mode.
+        if (normalized.endsWith("?")) {
+            return normalized
+        }
+
+        // Otherwise use a concise statement; question type/options already encode true/false.
+        val sentence = normalized
+            .split(Regex("(?<=[.!?])\\s+"))
+            .firstOrNull { it.length > 20 }
+            ?.trim()
+            ?: normalized.take(180)
+
+        return sentence
     }
 
     private fun normalizeCorrectAnswer(correct: String, options: List<String>): String {
